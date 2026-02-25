@@ -1,0 +1,24 @@
+services:
+  mysql:
+    image: mysql:8.0
+    container_name: wa_mysql
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpass
+      MYSQL_DATABASE: wa_saas
+      MYSQL_USER: wa_user
+      MYSQL_PASSWORD: wa_pass
+    ports:
+      - "3307:3306"
+    volumes:
+      - wa_mysql_data:/var/lib/mysql
+
+  adminer:
+    image: adminer
+    container_name: wa_adminer
+    restart: unless-stopped
+    ports:
+      - "8088:8080"
+
+volumes:
+  wa_mysql_data:

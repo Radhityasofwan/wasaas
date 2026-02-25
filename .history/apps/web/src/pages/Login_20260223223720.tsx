@@ -1,0 +1,122 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+
+/**
+ * Karena lingkungan pratinjau Canvas memerlukan kemandirian kode, 
+ * kita definisikan helper API secara lokal agar tidak terjadi error import.
+ */
+const getApiKey = (): string => {
+  if (typeof window !== "undefined") {
+    return localStorage.getItem("WA_KEY") || "";
+  }
+  return "";
+};
+
+const setApiKey = (key: string) => {
+  if (typeof window !== "undefined") {
+    localStorage.setItem("WA_KEY", key);
+  }
+};
+
+export default function Login() {
+  const nav = useNavigate();
+  const [key, setKey] = useState(getApiKey());
+  const [err, setErr] = useState<string | null>(null);
+
+  const handleLogin = () => {
+    try {
+      setErr(null);
+      const cleanKey = key.trim();
+      
+      if (!cleanKey.startsWith("live_")) {
+        throw new Error("API key tidak valid (harus diawali live_)");
+      }
+      
+      setApiKey(cleanKey);
+      
+      // Memberikan feedback visual sebelum navigasi
+      setTimeout(() => {
+        nav("/");
+      }, 500);
+      
+    } catch (e: any) {
+      setErr(e?.message || "Terjadi kesalahan saat masuk");
+    }
+  };
+
+  return (
+    <div className="min-h-screen w-full flex items-center justify-center p-6 relative overflow-hidden bg-[#f4f7fb]"
+         style={{
+           backgroundImage: `
+             radial-gradient(at 0% 0%, hsla(215,100%,92%,1) 0px, transparent 50%),
+             radial-gradient(at 100% 0%, hsla(275,100%,92%,1) 0px, transparent 50%),
+             radial-gradient(at 100% 100%, hsla(335,100%,92%,1) 0px, transparent 50%),
+             radial-gradient(at 0% 100%, hsla(165,100%,92%,1) 0px, transparent 50%)
+           `
+         }}>
+      
+      {/* Background Orbs dengan efek Liquid Blur */}
+      <div className="absolute top-[-10%] left-[-10%] w-[35rem] h-[35rem] bg-blue-400/20 rounded-full blur-[120px] pointer-events-none animate-pulse"></div>
+      <div className="absolute bottom-[-10%] right-[-10%] w-[35rem] h-[35rem] bg-purple-400/20 rounded-full blur-[120px] pointer-events-none"></div>
+
+      <div className="w-full max-w-[440px] relative z-10">
+        <div className="bg-white/40 backdrop-blur-2xl border border-white/60 rounded-[3rem] p-8 md:p-12 shadow-[0_20px_60px_rgba(31,38,135,0.08)]">
+          
+          <div className="flex flex-col items-center mb-10 text-center">
+            <div className="w-20 h-20 rounded-3xl bg-gradient-to-br from-blue-500 to-indigo-600 shadow-2xl shadow-blue-500/30 flex items-center justify-center text-white mb-6 transform rotate-3 hover:rotate-0 transition-transform duration-500">
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+              </svg>
+            </div>
+            <h1 className="text-3xl font-black text-slate-800 tracking-tighter mb-2">WA SaaS</h1>
+            <div className="h-1 w-12 bg-blue-500/20 rounded-full mb-4"></div>
+            <p className="text-slate-500 text-sm font-medium leading-relaxed">
+              Selamat datang kembali. Silakan masukkan kunci API Anda untuk mengelola dashboard.
+            </p>
+          </div>
+
+          <div className="space-y-6">
+            <div className="relative">
+              <label className="block text-[10px] font-black text-slate-400 mb-2 ml-4 uppercase tracking-[0.2em]">API Key</label>
+              <input
+                type="password"
+                value={key}
+                onChange={(e) => setKey(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                placeholder="live_xxxxxxxxxxxxxxxx"
+                className="w-full px-6 py-5 rounded-[2rem] bg-white/70 border border-white/80 backdrop-blur-md text-slate-700 placeholder-slate-300 focus:bg-white/90 focus:ring-[10px] focus:ring-blue-500/5 focus:border-blue-400/50 outline-none transition-all duration-500 shadow-sm text-sm font-mono"
+              />
+            </div>
+
+            {err && (
+              <div className="bg-rose-50/60 border border-rose-100 text-rose-600 px-6 py-4 rounded-2xl text-[11px] font-bold flex items-center gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+                <span className="flex-shrink-0 w-4 h-4 rounded-full bg-rose-500 text-white flex items-center justify-center text-[8px]">!</span>
+                {err}
+              </div>
+            )}
+
+            <button
+              onClick={handleLogin}
+              className="group w-full py-5 rounded-[2rem] bg-gradient-to-r from-blue-600 to-indigo-600 text-white font-extrabold text-sm shadow-xl shadow-blue-600/20 hover:shadow-blue-600/40 hover:scale-[1.03] active:scale-[0.97] transition-all duration-500 relative overflow-hidden"
+            >
+              <span className="relative z-10 flex items-center justify-center gap-2">
+                Masuk ke Dashboard
+                <svg className="group-hover:translate-x-1 transition-transform duration-300" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><line x1="5" y1="12" x2="19" y2="12"></line><polyline points="12 5 19 12 12 19"></polyline></svg>
+              </span>
+              <div className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent translate-x-[-100%] group-hover:translate-x-[100%] transition-transform duration-1000"></div>
+            </button>
+          </div>
+
+          <div className="mt-10 pt-8 border-t border-slate-200/20 text-center">
+            <p className="text-[10px] text-slate-400 font-bold uppercase tracking-widest">
+              Lokal Development Mode
+            </p>
+            <p className="text-[9px] text-slate-300 mt-1">
+              Kunci Anda disimpan secara aman di storage lokal browser ini.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}

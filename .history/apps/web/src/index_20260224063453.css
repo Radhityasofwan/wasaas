@@ -1,0 +1,46 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    /* Menggunakan font Inter standar modern */
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    @apply antialiased bg-slate-50;
+  }
+
+  /* Scrollbar khusus untuk Desktop */
+  @media (min-width: 768px) {
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+    ::-webkit-scrollbar-thumb {
+      @apply bg-slate-300 rounded-full;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      @apply bg-slate-400;
+    }
+  }
+
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+
+  /* Helper untuk perangkat iOS mobile (notch area) */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+File `main.tsx` Anda sudah benar dan **tidak perlu diubah**. Silakan *copy-paste* kode di atas ke file lokal Anda.

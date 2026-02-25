@@ -1,0 +1,12 @@
+{
+  "name": "wa-saas",
+  "private": true,
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev -w @wa/api",
+    "build": "npm run build -w @wa/api",
+    "start": "npm run start -w @wa/api"
+  }
+}

@@ -1,0 +1,55 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* MENGGUNAKAN SYSTEM FONT: Sangat ngebut, 0ms load time, 
+       friendly, dan terasa seperti aplikasi native perangkat bawaan */
+    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+  }
+
+  html, body, #root {
+    height: 100%;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overscroll-behavior-y: none; /* Mencegah efek bounce-scroll berlebih di iOS */
+    @apply antialiased bg-slate-50 text-slate-800;
+  }
+
+  /* Custom Thin Scrollbar for iOS feel */
+  ::-webkit-scrollbar {
+    width: 5px;
+    height: 5px;
+  }
+  
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  
+  ::-webkit-scrollbar-thumb {
+    @apply bg-slate-300/50 rounded-full;
+  }
+
+  ::-webkit-scrollbar-thumb:hover {
+    @apply bg-slate-400/50;
+  }
+
+  /* Hide scrollbar for specific elements */
+  .scrollbar-hide::-webkit-scrollbar {
+    display: none;
+  }
+  .scrollbar-hide {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
+  }
+}
+
+.glass-card {
+  @apply bg-white/40 backdrop-blur-xl border border-white/60 shadow-sm;
+}
+
+.glass-input {
+  @apply bg-white/50 border border-white/60 focus:bg-white/80 focus:border-blue-400/50 transition-all duration-300 outline-none;
+}

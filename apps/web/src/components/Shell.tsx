@@ -1,5 +1,6 @@
 import { Outlet, NavLink, useNavigate } from "react-router-dom";
 import { getApiKey, setApiKey } from "../lib/api";
+import logo from "../assets/logo-wasaas.png";
 
 const Item = ({ to, label }: { to: string; label: string }) => (
   <NavLink
@@ -20,9 +21,14 @@ export default function Shell() {
     <div className="h-full bg-[#0b141a] text-white">
       <div className="mx-auto grid h-full max-w-7xl grid-cols-[260px_1fr]">
         <aside className="border-r border-white/10 p-4">
-          <div className="mb-4">
-            <div className="text-lg font-semibold">WA SaaS</div>
-            <div className="text-xs opacity-70">Admin + Chat UI (PWA)</div>
+          
+          {/* Bagian Logo dan Judul Sidebar Diperbarui */}
+          <div className="mb-6 flex items-center gap-3">
+            <img src={logo} alt="WA SaaS Logo" className="h-9 w-auto object-contain" />
+            <div>
+              <div className="text-lg font-semibold leading-none">WA SaaS</div>
+              <div className="text-[10px] opacity-70 mt-1">Admin + Chat UI (PWA)</div>
+            </div>
           </div>
 
           {!key ? (

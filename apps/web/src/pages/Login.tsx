@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { MessageSquare, Lock, Mail, Key, Loader2, ArrowRight } from "lucide-react";
+import logo from "../assets/logo-wasaas.png";
 
 /**
  * HELPER INTERNAL: Manajemen API Key (Token Akses)
@@ -96,11 +97,11 @@ export default function Login() {
           
           {/* Logo & Header */}
           <div className="flex flex-col items-center mb-8 text-center">
-            <div className="w-16 h-16 rounded-2xl bg-[#f0f4f9] text-[#0b57d0] flex items-center justify-center mb-5 border border-slate-100">
+            <div className="w-16 h-16 rounded-2xl bg-[#f0f4f9] flex items-center justify-center mb-5 border border-slate-100 p-2">
               <img 
-                src="https://matiklaundry.site/wp-content/uploads/2026/02/logo_wa-saas.png" 
+                src={logo} 
                 alt="Logo" 
-                className="w-10 h-10 object-contain"
+                className="w-full h-full object-contain"
               />
             </div>
             <h1 className="text-2xl sm:text-3xl font-bold text-slate-800 tracking-tight mb-2">WA SaaS</h1>

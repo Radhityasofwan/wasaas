@@ -11,7 +11,7 @@ import {
   XCircle, Megaphone, CalendarClock, MessageSquare, 
   ExternalLink, Layers, CheckSquare, Sun, RefreshCw,
   Send, Loader2, X, Trash2, ChevronDown,
-  MonitorPlay, Camera, Globe, Hash, Settings2, Info, HelpCircle, FileSpreadsheet
+  MonitorPlay, Camera, Globe, Hash, Settings2, Info, HelpCircle, FileSpreadsheet, ArrowLeft
 } from "lucide-react";
 
 import { useConfirm } from "../App";
@@ -329,7 +329,7 @@ export default function Leads() {
       });
 
       // Menggunakan dynamic import untuk modul XLSX via CDN
-      const XLSX = await import('https://cdn.sheetjs.com/xlsx-0.20.1/package/xlsx.mjs');
+      const XLSX = await import('xlsx');
       
       const worksheet = XLSX.utils.json_to_sheet(formattedData);
       const workbook = XLSX.utils.book_new();

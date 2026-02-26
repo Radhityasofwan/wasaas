@@ -50,3 +50,24 @@ const sentToday = Number(rows?.[0]?.c ?? 0);
     throw new Error(`daily message limit reached: ${sentToday}/${limitMsgDay}`);
   }
 }
+
+export async function countActiveSessions(tenantId: number) {
+  const [rows] = await pool.query<any[]>(
+    `SELECT COUNT(*) AS c
+     FROM wa_sessions
+     WHERE tenant_id=? AND status IN ('connected','connecting')`,
+    [tenantId]
+  );
+  return Number(rows?.[0]?.c ?? 0);
+}
+
+export async function countMessagesToday(tenantId: number) {
+  const [rows] = await pool.query<any[]>(
+    `SELECT COUNT(*) AS c
+     FROM wa_messages
+     WHERE tenant_id=? AND direction='out' AND status='sent'
+       AND created_at >= CURDATE() AND created_at < (CURDATE() + INTERVAL 1 DAY)`,
+    [tenantId]
+  );
+  return Number(rows?.[0]?.c ?? 0);
+}

@@ -26,11 +26,11 @@ export async function enforceMessageLimit(req: any, res: any, next: any) {
   const lim = await getTenantLimits(tenantId);
   const used = await countMessagesToday(tenantId);
 
-  if (used >= lim.limitMessagesPerDay) {
+  if (used >= lim.limitMsgDay) {
     return res.status(429).json({
       ok: false,
       error: "message_limit_reached",
-      limit: lim.limitMessagesPerDay,
+      limit: lim.limitMsgDay,
       used
     });
   }

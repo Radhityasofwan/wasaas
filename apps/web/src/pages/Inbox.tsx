@@ -8,15 +8,8 @@
  * ============================================================================
  */
 
-import React, { 
-  useEffect, 
-  useMemo, 
-  useState, 
-  useRef, 
-  useCallback, 
-  ErrorInfo, 
-  Component 
-} from "react";
+import React, { useEffect, useMemo, useState, useRef, useCallback, Component } from "react";
+import type { ErrorInfo } from "react";
 
 import { 
   Activity, 
@@ -123,8 +116,8 @@ const getApiKey = (): string => {
   return "";
 };
 
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers || {});
+async function apiFetch<T>(path: string, init: RequestInit = {} ): Promise<T> {
+  const headers = new Headers(init.headers || {} );
   const key = getApiKey();
   
   if (key) {
@@ -145,7 +138,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   const text = await res.text();
   let data;
   try { 
-    data = text ? JSON.parse(text) : {}; 
+    data = text ? JSON.parse(text) : {} ; 
   } catch (e) { 
     throw new Error(`Server Error (HTTP ${res.status}). Respons bukan JSON yang valid.`); 
   }
@@ -398,10 +391,10 @@ function InboxComponent() {
     if (typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("wa_inbox_labels");
-        return saved ? JSON.parse(saved) : {};
-      } catch { return {}; }
+        return saved ? JSON.parse(saved) : {} ;
+      } catch { return {} ; }
     }
-    return {};
+    return {} ;
   });
 
   useEffect(() => {
@@ -515,7 +508,7 @@ function InboxComponent() {
       setAttachOpen(false);
       setMessages([]); 
       setTimeout(() => { scrollToBottom("auto"); setIsAtBottom(true); }, 100);
-      apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: jid }) }).catch((e) => {});
+      apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: jid }) }).catch((e) => {} );
     }
   };
 
@@ -523,7 +516,7 @@ function InboxComponent() {
     try { 
       const res = await apiFetch<{ ok: true; data: LeadRow[] }>("/leads?limit=1000"); 
       setLeads(res.data || []); 
-    } catch (e) { }
+    } catch (e) {} 
   };
 
   const loadCampaigns = async () => {
@@ -531,7 +524,7 @@ function InboxComponent() {
       const res = await apiFetch<{ ok: true; data: any[] }>("/followup/campaigns?status=active"); 
       setCampaigns(res.data || []); 
       if (res.data && res.data.length > 0) setFuPayload(p => ({ ...p, campaignId: String(res.data[0].id) })); 
-    } catch (e) { }
+    } catch (e) {} 
   };
 
   const loadSessions = async () => {
@@ -674,7 +667,7 @@ function InboxComponent() {
         labelModal.targets.forEach(t => { next[t.split('@')[0]] = { name: labelPayload.name, color: labelPayload.color }; }); 
         return next; 
       }); 
-      apiFetch("/leads/label", { method: "POST", body: JSON.stringify({ targets: labelModal.targets.map(t => t.split('@')[0]), label: labelPayload.name, color: labelPayload.color }) }).catch(()=>{}); 
+      apiFetch("/leads/label", { method: "POST", body: JSON.stringify({ targets: labelModal.targets.map(t => t.split('@')[0]), label: labelPayload.name, color: labelPayload.color }) }).catch(()=>{} ); 
       setLabelModal({ open: false, targets: [] }); setSelectedPeers([]); setIsSelectionMode(false); 
     } catch (e: any) { alert("Gagal: " + e.message); }
   }

@@ -128,7 +128,8 @@ const dashboardAuthMw = (req: any, res: any, next: any) => {
 };
 
 // ============================================================================
-// LOGIN (API) - UI calls: POST /api/auth/login or POST /api/login
+// LOGIN (API) - UI calls: POST /api/auth/login
+// Also keep legacy: POST /login
 // ============================================================================
 async function loginHandler(req: any, res: any) {
   try {
@@ -182,10 +183,8 @@ async function loginHandler(req: any, res: any) {
   }
 }
 
-// FIX: Pendaftaran rute yang lebih aman dan komprehensif (failsafe) untuk menanggulangi
-// limitasi Express 5 (path-to-regexp v8 strict matching) dan trailing slash.
-api.post(["/auth/login", "/auth/login/", "/login", "/login/"], loginHandler);
-app.post(["/login", "/login/", "/api/login", "/api/login/", "/api/auth/login", "/api/auth/login/"], loginHandler);
+api.post("/auth/login", loginHandler);
+app.post("/login", loginHandler); // legacy (opsional)
 
 // whoami
 api.get("/me", dashboardAuthMw, (req: any, res: any) => {

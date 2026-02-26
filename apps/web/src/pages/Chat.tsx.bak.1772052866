@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { apiFetch } from "../lib/api";
 import { useParams } from "react-router-dom";
-import { useEffect, useMemo, useState, useRef } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 export default function Chat() {
   const { sessionKey = "", peer = "" } = useParams();
@@ -10,10 +10,7 @@ export default function Chat() {
   const [text, setText] = useState("");
   const [cursor, setCursor] = useState<string | null>(null);
 
-  
-
-  const esRef = useRef<EventSource | null>(null);
-const qKey = useMemo(() => ["msgs", sessionKey, peer, cursor], [sessionKey, peer, cursor]);
+  const qKey = useMemo(() => ["msgs", sessionKey, peer, cursor], [sessionKey, peer, cursor]);
 
   const msgs = useQuery({
     queryKey: qKey,
@@ -40,16 +37,16 @@ const qKey = useMemo(() => ["msgs", sessionKey, peer, cursor], [sessionKey, peer
 
   // SSE optional: instant update
   useEffect(() => {
-    // SSE must include headers but EventSource cannot set headers
-    // => for now SSE is not used in browser mode with API key auth
-    // Once JWT is used, SSE can work (Authorization via query token).
-    return () => {
-      esRef.current?.close();
-      esRef.current = null;
-    };
+    let es: EventSource | null = null;
+    try {
+      // SSE must include headers but EventSource cannot set headers
+      // => for now SSE is not used in browser mode with API key auth
+      // Once JWT is used, SSE can work (Authorization via query token).
+    } catch {}
+    return () => { if (es) es.close(); };
   }, [sessionKey]);
 
-return (
+  return (
     <div>
       <div className="text-xl font-semibold">Chat</div>
       <div className="mt-1 text-sm opacity-70">{sessionKey} · {peer}</div>

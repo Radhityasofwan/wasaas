@@ -6,7 +6,7 @@
   ],
   "scripts": {
     "dev": "npm run dev -w @wa/api",
-    "build": "npm run build -w @wa/api",
+    "build": "npm run build -w @wa/api && npm run build -w web",
     "start": "npm run start -w @wa/api"
   }
 }

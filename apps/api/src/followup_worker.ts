@@ -1,8 +1,29 @@
 import { pool } from "./db";
+import path from "path";
+import fs from "fs";
 import { getSessionSock, sendText } from "./wa";
 import { sendMediaImage, sendMediaDocument, sendMediaVideo, sendLocation } from "./wa_media";
 
 let isRunning = false;
+
+function resolveUploadFromPublicUrl(publicUrl: string) {
+  // expected: https://DOMAIN/files/<filename> OR /files/<filename>
+  try {
+    const u = publicUrl.startsWith("http") ? new URL(publicUrl) : null;
+    const pathname = u ? u.pathname : publicUrl;
+    const idx = pathname.indexOf("/files/");
+    if (idx === -1) return null;
+    const rel = pathname.substring(idx + "/files/".length);
+    if (!rel) return null;
+    const filePath = path.join(process.cwd(), "storage", "uploads", rel);
+    if (!fs.existsSync(filePath)) return null;
+    const st = fs.statSync(filePath);
+    return { filePath, fileSize: st.size, fileName: path.basename(filePath) };
+  } catch {
+    return null;
+  }
+}
+
 
 // 1. ENGINE GREETING WAKTU (WIB)
 function getDynamicGreeting(): string {
@@ -76,9 +97,10 @@ export async function processFollowUpQueue() {
     console.log(`[FollowUp Worker] Memproses ${targets.length} target antrean...`);
 
     for (const target of targets) {
-      const { 
-        target_id, tenant_id, session_key, to_number, to_jid, target_added_at, 
-        trigger_condition, template_found, message_type, text_body, media_url 
+      const {
+        target_id, tenant_id, session_key, to_number, to_jid, target_added_at,
+        trigger_condition, template_found, message_type, text_body, media_url,
+        media_name, media_mime
       } = target;
 
       if (!template_found) {
@@ -130,11 +152,56 @@ export async function processFollowUpQueue() {
         if (message_type === 'text') {
           sendResult = await sendText(session_key, to_jid, finalCaptionOrText);
         } else if (message_type === 'image' && media_url) {
-          sendResult = await sendMediaImage({ tenantId: tenant_id, userId: 1, sessionKey: session_key, to: to_jid, caption: finalCaptionOrText, publicUrl: media_url });
+          {
+          const resolved = resolveUploadFromPublicUrl(media_url);
+          if (!resolved) throw new Error("Media file not found on server for URL: " + media_url);
+          sendResult = await sendMediaImage({
+            tenantId: tenant_id,
+            userId: 1,
+            sessionKey: session_key,
+            to: to_jid,
+            caption: finalCaptionOrText,
+            filePath: resolved.filePath,
+            mime: (media_mime || "application/octet-stream"),
+            fileName: (media_name || resolved.fileName),
+            fileSize: resolved.fileSize,
+            publicUrl: media_url
+          });
+        }
         } else if (message_type === 'document' && media_url) {
-          sendResult = await sendMediaDocument({ tenantId: tenant_id, userId: 1, sessionKey: session_key, to: to_jid, caption: finalCaptionOrText, publicUrl: media_url });
+          {
+          const resolved = resolveUploadFromPublicUrl(media_url);
+          if (!resolved) throw new Error("Media file not found on server for URL: " + media_url);
+          sendResult = await sendMediaDocument({
+            tenantId: tenant_id,
+            userId: 1,
+            sessionKey: session_key,
+            to: to_jid,
+            caption: finalCaptionOrText,
+            filePath: resolved.filePath,
+            mime: (media_mime || "application/octet-stream"),
+            fileName: (media_name || resolved.fileName),
+            fileSize: resolved.fileSize,
+            publicUrl: media_url
+          });
+        }
         } else if (message_type === 'video' && media_url) {
-          sendResult = await sendMediaVideo({ tenantId: tenant_id, userId: 1, sessionKey: session_key, to: to_jid, caption: finalCaptionOrText, publicUrl: media_url });
+          {
+          const resolved = resolveUploadFromPublicUrl(media_url);
+          if (!resolved) throw new Error("Media file not found on server for URL: " + media_url);
+          sendResult = await sendMediaVideo({
+            tenantId: tenant_id,
+            userId: 1,
+            sessionKey: session_key,
+            to: to_jid,
+            caption: finalCaptionOrText,
+            filePath: resolved.filePath,
+            mime: (media_mime || "application/octet-stream"),
+            fileName: (media_name || resolved.fileName),
+            fileSize: resolved.fileSize,
+            publicUrl: media_url
+          });
+        }
         } else if (message_type === 'location' && media_url) {
           const [latStr, lngStr] = media_url.split(",");
           const lat = Number(latStr);

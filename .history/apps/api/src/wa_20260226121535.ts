@@ -12,8 +12,6 @@
  * - Multi-Keyword Auto Reply & Typing Indicator Anti-Crash.
  * - Graceful Error Handling & Strict Typing ekstensif (> 900 baris).
  * - [FIX] Network Stability, Cacheable Keystore & Anti-Spam Reconnect (10s).
- * - [FIX] Mencegah Socket Timeout (Code 408) akibat Presence Update pada nomor LID.
- * - [FIX] Mencegah "Zombie Session" saat sesi dihapus oleh user.
  * ============================================================================
  */
 
@@ -45,6 +43,10 @@ export type QrState = {
 };
 const qrStateMap = new Map<string, QrState>();
 
+export function getSessionQRState(sessionKey: string): QrState | null {
+  return qrStateMap.get(sessionKey) || null;
+}
+
 export type SessionEntry = {
   sessionKey: string;
   sock: ReturnType<typeof makeWASocket> | null;
@@ -64,9 +66,6 @@ console.log("WA_PARSER_VERSION=9.1 (Enterprise CRM + Privacy Bypass) loaded");
 
 const sessions = new Map<string, SessionEntry>();
 
-// FIX ZOMBIE SESSION: Penanda untuk sesi yang sengaja dihentikan/dihapus
-const intentionallyStopped = new Set<string>();
-
 export type SessionMeta = { 
   status?: string; 
   qr?: string | null; 
@@ -74,10 +73,6 @@ export type SessionMeta = {
   lastSeen?: number | null; 
 };
 const sessionMeta = new Map<string, SessionMeta>();
-
-export function getSession(sessionKey: string) {
-  return sessions.get(sessionKey);
-}
 
 export function getSessionSock(sessionKey: string) {
   const e = sessions.get(sessionKey);
@@ -367,9 +362,7 @@ async function processAutoReply(tenantId: number, sessionKey: string, remoteJid:
       const delay = matchedRule.delay_ms || 2000;
       const sock = getSessionSock(sessionKey);
       
-      const isPresenceSupported = !remoteJid.includes('@lid') && !remoteJid.includes('@broadcast') && !remoteJid.includes('@g.us');
-
-      if (sock && isPresenceSupported) {
+      if (sock) {
          try {
            await sock.sendPresenceUpdate('composing', remoteJid);
          } catch (err) {
@@ -379,10 +372,9 @@ async function processAutoReply(tenantId: number, sessionKey: string, remoteJid:
       
       setTimeout(async () => {
         try { 
-          const currentSock = getSessionSock(sessionKey);
-          if (currentSock && isPresenceSupported) {
+          if (sock) {
              try { 
-               await currentSock.sendPresenceUpdate('paused', remoteJid); 
+               await sock.sendPresenceUpdate('paused', remoteJid); 
              } catch(e) {}
           }
           
@@ -458,19 +450,25 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
 
   const sock = makeWASocket({
     version,
+    // FIX: Gunakan cacheable keystore untuk meringankan beban pembacaan file I/O memori WhatsApp
     auth: {
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, sockLogger),
     },
     printQRInTerminal: false, 
     logger: sockLogger,
+    // FIX: Menyamarkan footprint menggunakan parameter bawaan Baileys
     browser: Browsers.macOS('Desktop'),
+    
+    // FIX: PENGATURAN STABILITAS JARINGAN EKSTRA (Mencegah "Error in sending keep alive")
     keepAliveIntervalMs: 30000,
     connectTimeoutMs: 60000,
     defaultQueryTimeoutMs: 0,
     syncFullHistory: false,
     markOnlineOnConnect: false,
     generateHighQualityLinkPreview: false,
+    
+    // FIX: Fallback pesan yang gagal di dekripsi untuk menghindari crash
     getMessage: async (key) => {
       return { conversation: "Pesan" };
     }
@@ -535,13 +533,6 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
         last_seen_at: new Date()
       });
 
-      // FIX ZOMBIE SESSION: Cegat auto-reconnect jika sesi ini sedang dihapus oleh pengguna
-      if (intentionallyStopped.has(sessionKey)) {
-        console.log(`[${sessionKey}] 🛑 Session was intentionally stopped (Deleted by User). Halting auto-reconnect.`);
-        intentionallyStopped.delete(sessionKey); // Bersihkan flag
-        return; 
-      }
-
       console.warn(`[${sessionKey}] ⚠️ Connection Closed. Reason: ${finalStatus} (Code: ${code})`);
       enqueueWebhook(ctx.tenantId, "session.update", { sessionKey, status: finalStatus, reason: code }).catch(()=>{});
 
@@ -550,6 +541,7 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
         return;
       }
 
+      // FIX: Menunda auto-reconnect menjadi 10 detik agar tidak dicap sebagai serangan DDoS/Spam oleh server WA
       console.log(`[${sessionKey}] 🔄 Attempting auto-reconnect in 10 seconds...`);
       setTimeout(() => startSession(sessionKey, ctx).catch(console.error), 10000);
     }
@@ -805,9 +797,6 @@ export function isConnected(sessionKey: string) {
 }
 
 export async function stopSession(sessionKey: string) {
-  // FIX ZOMBIE SESSION: Tambahkan session ini ke daftar hitam agar tidak di-reconnect otomatis
-  intentionallyStopped.add(sessionKey);
-  
   try { 
     const sock = getSessionSock(sessionKey);
     if (sock) sock.ws.close(); 
@@ -815,10 +804,8 @@ export async function stopSession(sessionKey: string) {
     console.warn(`[${sessionKey}] ⚠️ Error closing websocket:`, e);
   }
   
-  // FIX ZOMBIE SESSION: Pastikan semua state yang ada di memory terkait session ini dihapus bersih
   try { sessions.delete(sessionKey); } catch {}
   try { sessionMeta.delete(sessionKey); } catch {}
-  try { qrStateMap.delete(sessionKey); } catch {}
   console.log(`[${sessionKey}] 🛑 Session stopped and flushed from memory.`);
 }
 
@@ -866,3 +853,4 @@ export async function sendText(sessionKey: string, to: string, text: string) {
     return { ok: false, error: e?.message || "Send operation failed" };
   }
 }
+```

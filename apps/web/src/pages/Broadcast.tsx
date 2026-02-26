@@ -1,8 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { 
-  Play, Pause, Square, Trash2, Eye, 
-  Image as ImageIcon, FileText, Type, Clock, CheckCircle2, Layers, RefreshCw, CheckSquare, XCircle, AlertTriangle, Send, Megaphone
-} from "lucide-react";
+import { Play, Pause, Square, Trash2, Eye, 
+  Image as ImageIcon, FileText, Type, Clock, CheckCircle2, Layers, RefreshCw, CheckSquare, XCircle, AlertTriangle, Send, Megaphone, Loader2 } from "lucide-react";
 
 import { useConfirm } from "../App";
 
@@ -64,7 +62,9 @@ type JobRow = {
   updated_at: string;
 };
 type BroadcastItem = {
-  id: number;
+  
+  last_error?: string | null;
+id: number;
   to_number: string;
   status: string;
   reply_status: string;

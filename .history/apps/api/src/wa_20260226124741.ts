@@ -75,10 +75,6 @@ export type SessionMeta = {
 };
 const sessionMeta = new Map<string, SessionMeta>();
 
-export function getSession(sessionKey: string) {
-  return sessions.get(sessionKey);
-}
-
 export function getSessionSock(sessionKey: string) {
   const e = sessions.get(sessionKey);
   return e?.sock || null;

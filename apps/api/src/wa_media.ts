@@ -1,6 +1,6 @@
 import fs from "fs";
 import { pool } from "./db";
-import { getSession, isConnected } from "./wa";
+import { getSessionSock, isConnected } from "./wa";
 
 
 async function upsertChat(tenantId: number, sessionKey: string, remoteJid: string, chatType: "private" | "group" | "broadcast" = "private") {
@@ -84,7 +84,7 @@ export async function sendMediaImage(input: {
   fileSize: number;
   publicUrl: string;
 }) {
-  const sock = getSession(input.sessionKey);
+  const sock = getSessionSock(input.sessionKey);
   if (!sock) return { ok: false, error: "session not running" };
   if (!isConnected(input.sessionKey)) return { ok: false, error: "session not connected" };
 
@@ -147,7 +147,7 @@ export async function sendMediaDocument(input: {
   fileSize: number;
   publicUrl: string;
 }) {
-  const sock = getSession(input.sessionKey);
+  const sock = getSessionSock(input.sessionKey);
   if (!sock) return { ok: false, error: "session not running" };
   if (!isConnected(input.sessionKey)) return { ok: false, error: "session not connected" };
 
@@ -211,7 +211,7 @@ export async function sendMediaVideo(input: {
   fileSize: number;
   publicUrl: string;
 }) {
-  const sock = getSession(input.sessionKey);
+  const sock = getSessionSock(input.sessionKey);
   if (!sock) return { ok: false, error: "session not running" };
   if (!isConnected(input.sessionKey)) return { ok: false, error: "session not connected" };
 
@@ -272,7 +272,7 @@ export async function sendLocation(input: {
   name?: string;
   address?: string;
 }) {
-  const sock = getSession(input.sessionKey);
+  const sock = getSessionSock(input.sessionKey);
   if (!sock) return { ok: false, error: "session not running" };
   if (!isConnected(input.sessionKey)) return { ok: false, error: "session not connected" };
 

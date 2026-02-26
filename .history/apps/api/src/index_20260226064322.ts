@@ -128,7 +128,8 @@ const dashboardAuthMw = (req: any, res: any, next: any) => {
 };
 
 // ============================================================================
-// LOGIN (API) - UI calls: POST /api/auth/login or POST /api/login
+// LOGIN (API) - UI calls: POST /api/auth/login
+// Also keep legacy: POST /login
 // ============================================================================
 async function loginHandler(req: any, res: any) {
   try {
@@ -182,10 +183,8 @@ async function loginHandler(req: any, res: any) {
   }
 }
 
-// FIX: Pendaftaran rute yang lebih aman dan komprehensif (failsafe) untuk menanggulangi
-// limitasi Express 5 (path-to-regexp v8 strict matching) dan trailing slash.
-api.post(["/auth/login", "/auth/login/", "/login", "/login/"], loginHandler);
-app.post(["/login", "/login/", "/api/login", "/api/login/", "/api/auth/login", "/api/auth/login/"], loginHandler);
+api.post("/auth/login", loginHandler);
+app.post("/login", loginHandler); // legacy (opsional)
 
 // whoami
 api.get("/me", dashboardAuthMw, (req: any, res: any) => {
@@ -499,8 +498,7 @@ if (WEB_DIST) {
   app.use(express.static(WEB_DIST, { index: false }));
 
   // SPA fallback: only GET, and never /api or /files
-  // PERBAIKAN: Mengubah string "*" menjadi regex /.*/ untuk support Express versi terbaru
-  app.get(/.*/, (req, res, next) => {
+  app.get("*", (req, res, next) => {
     if (req.method !== "GET") return next();
     const p = req.path || "/";
     if (p.startsWith("/api") || p.startsWith("/files")) return next();

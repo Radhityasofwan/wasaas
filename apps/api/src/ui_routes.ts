@@ -95,7 +95,13 @@ function mustString(v: unknown): string {
 function normalizeRemoteJid(peer: string): string {
   if (!peer) return peer;
   if (peer.includes("@")) return peer;
-  return `${peer}@s.whatsapp.net`;
+
+  // Normalize to 62... format
+  let cleanNumber = peer.replace(/\D/g, "");
+  if (cleanNumber.startsWith("0")) {
+    cleanNumber = "62" + cleanNumber.slice(1);
+  }
+  return `${cleanNumber}@s.whatsapp.net`;
 }
 
 /**
@@ -106,7 +112,7 @@ function normalizeRemoteJid(peer: string): string {
 function safeParseRawJson(rawData: string | object | null): RawBaileysMessage | null {
   if (!rawData) return null;
   if (typeof rawData === "object") return rawData as RawBaileysMessage;
-  
+
   try {
     return JSON.parse(rawData) as RawBaileysMessage;
   } catch (err) {
@@ -195,7 +201,7 @@ export async function listConversations(req: any, res: any) {
        LEFT JOIN wa_contacts cont
          ON cont.tenant_id = ? AND cont.session_key = ? AND cont.jid = lm.remote_jid
        ORDER BY m.id DESC
-       LIMIT 500`,
+       LIMIT 50`,
       [tenantId, sessionKey, tenantId, sessionKey, tenantId, sessionKey]
     );
 
@@ -212,7 +218,7 @@ export async function listConversations(req: any, res: any) {
       return {
         chatId: r.chat_id ?? null,
         remoteJid: r.remote_jid,
-        name: r.contact_name ?? null, 
+        name: r.contact_name ?? null,
         unreadCount: Number(r.unread_count ?? 0),
         lastMessage: {
           id: r.last_message_id,
@@ -221,7 +227,7 @@ export async function listConversations(req: any, res: any) {
           text: r.last_text ?? null,
           mediaUrl: r.last_media_url ?? null,
           time: r.last_time,
-          pushName: pushName 
+          pushName: pushName
         }
       };
     });
@@ -256,12 +262,12 @@ export async function listMessages(req: any, res: any) {
   const remoteJid = normalizeRemoteJid(parsed.data.peer);
 
   // Pembatasan limit pagination yang rasional
-  const limit = Math.max(1, Math.min(Number(parsed.data.limit || 50), 200));
+  const limit = Math.max(1, Math.min(Number(parsed.data.limit || 30), 100));
   const cursorId = parsed.data.cursor ? Number(parsed.data.cursor) : null;
 
   const params: any[] = [tenantId, sessionKey, remoteJid];
   let cursorSql = "";
-  
+
   if (cursorId && Number.isFinite(cursorId)) {
     cursorSql = " AND id < ? ";
     params.push(cursorId);
@@ -284,7 +290,7 @@ export async function listMessages(req: any, res: any) {
     const messages = rows.reverse().map((m) => {
       let participant = null;
       let pushName = null;
-      
+
       if (m.raw_json) {
         const rawParsed = safeParseRawJson(m.raw_json);
         if (rawParsed) {
@@ -298,25 +304,25 @@ export async function listMessages(req: any, res: any) {
         direction: m.direction,
         type: m.message_type,
         text: m.text_body ?? null,
-        media: m.media_url ? { 
-          url: m.media_url, 
-          mime: m.media_mime ?? null, 
-          name: m.media_name ?? null, 
-          size: m.media_size ?? null 
+        media: m.media_url ? {
+          url: m.media_url,
+          mime: m.media_mime ?? null,
+          name: m.media_name ?? null,
+          size: m.media_size ?? null
         } : null,
-        location: m.latitude != null && m.longitude != null ? { 
-          latitude: Number(m.latitude), 
-          longitude: Number(m.longitude) 
+        location: m.latitude != null && m.longitude != null ? {
+          latitude: Number(m.latitude),
+          longitude: Number(m.longitude)
         } : null,
         status: m.status,
         error: m.error_text ?? null,
         time: m.created_at,
-        participant, 
-        pushName     
+        participant,
+        pushName
       };
     });
 
-    const nextCursor = messages.length ? String(messages[0].id) : null; 
+    const nextCursor = messages.length ? String(messages[0].id) : null;
     return res.json({ ok: true, remoteJid, messages, nextCursor });
   } catch (error: any) {
     console.error("[listMessages] Error fetching messages:", error);
@@ -380,7 +386,7 @@ export async function deleteConversations(req: any, res: any) {
   try {
     // Format JID seluruh peer
     const normalizedPeers = peers.map((p: string) => normalizeRemoteJid(p));
-    
+
     if (normalizedPeers.length === 0) {
       return res.json({ ok: true });
     }
@@ -429,7 +435,7 @@ export async function streamSSE(req: any, res: any) {
   const tenantId = req.auth.tenantId;
   const sessionKey = parsed.data.sessionKey ? mustString(parsed.data.sessionKey) : null;
   let lastId = parsed.data.sinceId ? Number(parsed.data.sinceId) : 0;
-  
+
   if (!Number.isFinite(lastId) || lastId < 0) {
     lastId = 0;
   }
@@ -454,7 +460,7 @@ export async function streamSSE(req: any, res: any) {
     try {
       const params: any[] = [tenantId, lastId];
       let sessionSql = "";
-      
+
       if (sessionKey) {
         sessionSql = " AND session_key = ? ";
         params.push(sessionKey);

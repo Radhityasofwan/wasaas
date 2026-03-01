@@ -11,30 +11,30 @@
 import React, { useEffect, useMemo, useState, useRef, useCallback, Component } from "react";
 import type { ErrorInfo } from "react";
 
-import { 
-  Activity, 
-  Clock, 
-  Filter, 
-  Tag, 
-  CheckCheck, 
-  X, 
-  Check, 
-  Search, 
-  Paperclip, 
-  Send, 
-  Plus, 
-  Image as ImageIcon, 
-  FileText, 
-  MapPin, 
-  Trash2, 
-  Megaphone, 
-  CalendarClock, 
-  Layers, 
-  MessageSquare, 
-  MessageCircle, 
-  Users, 
-  User, 
-  Loader2, 
+import {
+  Activity,
+  Clock,
+  Filter,
+  Tag,
+  CheckCheck,
+  X,
+  Check,
+  Search,
+  Paperclip,
+  Send,
+  Plus,
+  Image as ImageIcon,
+  FileText,
+  MapPin,
+  Trash2,
+  Megaphone,
+  CalendarClock,
+  Layers,
+  MessageSquare,
+  MessageCircle,
+  Users,
+  User,
+  Loader2,
   AlertTriangle,
   UserPlus,
   ArrowLeft
@@ -58,16 +58,16 @@ interface ErrorBoundaryState {
 class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
   constructor(props: ErrorBoundaryProps) {
     super(props);
-    this.state = { 
-      hasError: false, 
-      error: null 
+    this.state = {
+      hasError: false,
+      error: null
     };
   }
 
   static getDerivedStateFromError(error: Error): ErrorBoundaryState {
-    return { 
-      hasError: true, 
-      error 
+    return {
+      hasError: true,
+      error
     };
   }
 
@@ -84,7 +84,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
             Terjadi Kesalahan Kritis
           </h2>
           <p className="text-sm font-medium mb-6 max-w-md leading-relaxed">
-            Komponen Inbox mengalami gangguan pada mesin perenderan React. 
+            Komponen Inbox mengalami gangguan pada mesin perenderan React.
             Hal ini bisa disebabkan oleh data yang korup dari server atau kesalahan memori.
             Silakan muat ulang halaman.
             <br />
@@ -92,7 +92,7 @@ class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundaryState> {
               {this.state.error?.message || "Unknown Runtime Error"}
             </span>
           </p>
-          <button 
+          <button
             onClick={() => window.location.reload()}
             className="px-6 py-3 bg-[#0b57d0] text-white font-bold text-sm rounded-full shadow-sm hover:bg-[#001d35] active:scale-95 transition-all"
           >
@@ -116,38 +116,38 @@ const getApiKey = (): string => {
   return "";
 };
 
-async function apiFetch<T>(path: string, init: RequestInit = {} ): Promise<T> {
-  const headers = new Headers(init.headers || {} );
+async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
+  const headers = new Headers(init.headers || {});
   const key = getApiKey();
-  
+
   if (key) {
     headers.set("x-api-key", key);
   }
-  
+
   if (!headers.get("Content-Type") && !(init.body instanceof FormData)) {
     headers.set("Content-Type", "application/json");
   }
-  
+
   const url = path.startsWith("http") ? path : `/api/${path.startsWith("/") ? path.slice(1) : path}`;
-  
-  const res = await fetch(url, { 
-    ...init, 
-    headers 
+
+  const res = await fetch(url, {
+    ...init,
+    headers
   });
-  
+
   const text = await res.text();
   let data;
-  try { 
-    data = text ? JSON.parse(text) : {} ; 
-  } catch (e) { 
-    throw new Error(`Server Error (HTTP ${res.status}). Respons bukan JSON yang valid.`); 
+  try {
+    data = text ? JSON.parse(text) : {};
+  } catch (e) {
+    throw new Error(`Server Error (HTTP ${res.status}). Respons bukan JSON yang valid.`);
   }
-  
+
   if (!res.ok) {
     const errorMsg = data?.error || "Terjadi kesalahan yang tidak diketahui pada server API";
     throw new Error(errorMsg);
   }
-  
+
   return data as T;
 }
 
@@ -164,73 +164,73 @@ function dedupeByRemoteJid(items: any[]) {
 // 3. TYPE DEFINITIONS & FORMATTERS
 // ============================================================================
 
-export interface SessionRow { 
-  session_key: string; 
-  status: string; 
+export interface SessionRow {
+  session_key: string;
+  status: string;
 }
 
 export interface ConvRow {
   chatId: number;
   remoteJid: string;
-  name?: string | null; 
+  name?: string | null;
   unreadCount: number;
-  lastMessage: { 
-    id: number; 
-    direction: string; 
-    type: string; 
-    text: string | null; 
-    mediaUrl: string | null; 
-    time: string; 
-    status: string; 
+  lastMessage: {
+    id: number;
+    direction: string;
+    type: string;
+    text: string | null;
+    mediaUrl: string | null;
+    time: string;
+    status: string;
     pushName?: string | null;
   };
 }
 
 export interface MsgRow {
-  id: number; 
-  direction: "in" | "out"; 
-  type: string; 
-  text: string | null; 
-  media: any; 
-  location: any; 
-  status: string; 
-  error: string | null; 
+  id: number;
+  direction: "in" | "out";
+  type: string;
+  text: string | null;
+  media: any;
+  location: any;
+  status: string;
+  error: string | null;
   time: string;
-  participant?: string | null; 
-  pushName?: string | null;   
+  participant?: string | null;
+  pushName?: string | null;
 }
 
-export interface LeadRow { 
-  to_number: string; 
-  has_replied: number; 
+export interface LeadRow {
+  to_number: string;
+  has_replied: number;
 }
 
-export interface CustomLabel { 
-  name: string; 
-  color: string; 
+export interface CustomLabel {
+  name: string;
+  color: string;
 }
 
 export const LABEL_COLORS = [
-  'bg-rose-500', 
-  'bg-orange-500', 
-  'bg-amber-500', 
-  'bg-emerald-500', 
+  'bg-rose-500',
+  'bg-orange-500',
+  'bg-amber-500',
+  'bg-emerald-500',
   'bg-cyan-500',
   'bg-[#0b57d0]', // Google Blue
-  'bg-indigo-500', 
-  'bg-purple-500', 
+  'bg-indigo-500',
+  'bg-purple-500',
   'bg-slate-800'
 ];
 
 export const getSenderColor = (jid: string): string => {
   const colors = [
-    'text-rose-500', 
-    'text-[#0b57d0]', 
-    'text-emerald-600', 
-    'text-amber-600', 
-    'text-purple-500', 
-    'text-cyan-600', 
-    'text-pink-500', 
+    'text-rose-500',
+    'text-[#0b57d0]',
+    'text-emerald-600',
+    'text-amber-600',
+    'text-purple-500',
+    'text-cyan-600',
+    'text-pink-500',
     'text-indigo-500'
   ];
   if (!jid) return colors[0];
@@ -244,32 +244,32 @@ export const getSenderColor = (jid: string): string => {
 export function normalizeDate(dateStr: string): Date {
   if (!dateStr) return new Date();
   let safeStr = dateStr;
-  
+
   if (safeStr.includes(" ") && !safeStr.includes("T")) {
     safeStr = safeStr.replace(" ", "T");
     if (!safeStr.endsWith("Z")) {
-      safeStr += "Z"; 
+      safeStr += "Z";
     }
   }
-  
+
   const d = new Date(safeStr);
-  d.setHours(d.getHours() + 7); 
+  d.setHours(d.getHours() + 7);
   return d;
 }
 
 export function formatTime(dateStr: string): string {
   if (!dateStr) return "";
   const d = normalizeDate(dateStr);
-  return d.toLocaleTimeString("id-ID", { 
-    hour: "2-digit", 
-    minute: "2-digit" 
+  return d.toLocaleTimeString("id-ID", {
+    hour: "2-digit",
+    minute: "2-digit"
   });
 }
 
 export function formatChatDate(dateStr: string, nowTime: Date): string {
   if (!dateStr) return "";
   const d = normalizeDate(dateStr);
-  
+
   const isToday = nowTime.toLocaleDateString("id-ID") === d.toLocaleDateString("id-ID");
   const yesterday = new Date(nowTime);
   yesterday.setDate(yesterday.getDate() - 1);
@@ -277,24 +277,32 @@ export function formatChatDate(dateStr: string, nowTime: Date): string {
 
   if (isToday) return formatTime(dateStr);
   if (isYesterday) return "Kemarin";
-  
-  return d.toLocaleDateString("id-ID", { 
-    day: "2-digit", 
-    month: "2-digit", 
-    year: "2-digit" 
+
+  return d.toLocaleDateString("id-ID", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "2-digit"
   });
 }
 
 export function formatContactName(jid: string, name?: string | null): string {
   const isGroup = jid.includes("@g.us");
-  if (name && name.trim() !== "" && name !== jid) return name; 
+  if (name && name.trim() !== "" && name !== jid) return name;
   if (isGroup) return "Grup Obrolan WA";
   if (!jid) return "Identitas Tidak Diketahui";
-  
-  const num = jid.split("@")[0];
+
+  let num = jid.split("@")[0];
   if (jid.includes("@lid")) return `~${num} (LID)`;
-  if (num.startsWith("62")) return `+62 ${num.slice(2)}`;
-  return num; 
+
+  // Normalize to +62 format
+  num = num.replace(/\D/g, "");
+  if (num.startsWith("0")) {
+    num = "62" + num.slice(1);
+  }
+  if (num.startsWith("62")) {
+    return `+62 ${num.slice(2)}`;
+  }
+  return `+${num}`;
 }
 
 // ============================================================================
@@ -308,7 +316,7 @@ const EmptyChatState: React.FC = () => (
     </div>
     <h2 className="text-2xl font-bold text-slate-800 tracking-tight mb-2">WhatsApp SaaS Enterprise</h2>
     <p className="text-sm font-medium text-slate-500 max-w-sm text-center leading-relaxed">
-      Aplikasi terhubung langsung dengan mesin Baileys.<br/>
+      Aplikasi terhubung langsung dengan mesin Baileys.<br />
       Pilih percakapan dari daftar untuk mulai berinteraksi.
     </p>
   </div>
@@ -326,35 +334,35 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ msg, liveTime, isGroup })
   return (
     <div className={`flex ${isOut ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
       <div className={`max-w-[85%] md:max-w-[70%] px-4 py-3 shadow-sm relative transition-all duration-300 group ${isOut ? "bg-[#0b57d0] text-white rounded-2xl rounded-tr-sm" : "bg-[#f0f4f9] text-[#1f1f1f] rounded-2xl rounded-tl-sm"}`}>
-        
+
         {isGroup && !isOut && (
           <div className={`text-xs font-bold mb-1.5 cursor-pointer hover:underline ${getSenderColor(msg.participant || '')}`}>
-             {msg.pushName || formatContactName(msg.participant || "Anggota Grup")}
+            {msg.pushName || formatContactName(msg.participant || "Anggota Grup")}
           </div>
         )}
 
         {msg.type === 'image' && (
           <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-            <ImageIcon size={14} strokeWidth={2.5}/> Lampiran Gambar
+            <ImageIcon size={14} strokeWidth={2.5} /> Lampiran Gambar
           </div>
         )}
-        
+
         {msg.type === 'document' && (
           <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-            <FileText size={14} strokeWidth={2.5}/> Dokumen Teks
+            <FileText size={14} strokeWidth={2.5} /> Dokumen Teks
           </div>
         )}
-        
+
         {msg.type === 'location' && (
           <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-            <MapPin size={14} strokeWidth={2.5}/> Lokasi Geografis
+            <MapPin size={14} strokeWidth={2.5} /> Lokasi Geografis
           </div>
         )}
 
         <p className="text-[14px] md:text-[15px] leading-relaxed font-normal break-words whitespace-pre-wrap">
           {msg.text || (msg.type !== 'text' ? '[Isi Lampiran Media Berhasil Disampaikan]' : '')}
         </p>
-        
+
         <div className="text-[10px] mt-1.5 flex justify-end items-center gap-1.5 opacity-70 font-medium">
           {formatTime(msg.time)}
           {isOut && (
@@ -374,7 +382,7 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ msg, liveTime, isGroup })
 
 function InboxComponent() {
   const confirm = useConfirm();
-  
+
   const [sessions, setSessions] = useState<SessionRow[]>([]);
   const [sessionKey, setSessionKey] = useState<string>("");
   const [convs, setConvs] = useState<ConvRow[]>([]);
@@ -386,15 +394,15 @@ function InboxComponent() {
     const timer = setInterval(() => setLiveTime(new Date()), 1000);
     return () => clearInterval(timer);
   }, []);
-  
+
   const [customLabels, setCustomLabels] = useState<Record<string, CustomLabel>>(() => {
     if (typeof window !== "undefined") {
       try {
         const saved = localStorage.getItem("wa_inbox_labels");
-        return saved ? JSON.parse(saved) : {} ;
-      } catch { return {} ; }
+        return saved ? JSON.parse(saved) : {};
+      } catch { return {}; }
     }
-    return {} ;
+    return {};
   });
 
   useEffect(() => {
@@ -402,7 +410,7 @@ function InboxComponent() {
       localStorage.setItem("wa_inbox_labels", JSON.stringify(customLabels));
     }
   }, [customLabels]);
-  
+
   const uniqueLabels = useMemo(() => {
     const map = new Map<string, CustomLabel>();
     Object.values(customLabels).forEach(l => {
@@ -413,7 +421,7 @@ function InboxComponent() {
 
   const [peer, setPeer] = useState<string>("");
   const activePeerRef = useRef<string>("");
-  
+
   useEffect(() => {
     activePeerRef.current = peer;
   }, [peer]);
@@ -422,15 +430,16 @@ function InboxComponent() {
   const [text, setText] = useState<string>("");
   const [err, setErr] = useState<string | null>(null);
   const [sending, setSending] = useState<boolean>(false);
-  
+
   const [searchQuery, setSearchQuery] = useState<string>("");
   const [activeFilter, setActiveFilter] = useState<'all' | 'personal' | 'group' | 'unread' | 'read' | string>('all');
-  
+
   const [isSelectionMode, setIsSelectionMode] = useState<boolean>(false);
   const [selectedPeers, setSelectedPeers] = useState<string[]>([]);
   const [attachOpen, setAttachOpen] = useState<boolean>(false);
-  const [msgLimit, setMsgLimit] = useState<number>(100);
-  
+  const [hasMoreMsgs, setHasMoreMsgs] = useState<boolean>(true);
+  const [loadingMore, setLoadingMore] = useState<boolean>(false);
+
   const [mediaModal, setMediaModal] = useState<{ open: boolean; type: 'image' | 'document' | 'location'; }>({ open: false, type: 'image' });
   const [mediaPayload, setMediaPayload] = useState({ url: "", caption: "", lat: "", lng: "" });
   const [bcModal, setBcModal] = useState<{ open: boolean; targets: string[]; }>({ open: false, targets: [] });
@@ -448,11 +457,11 @@ function InboxComponent() {
 
   const filteredConvs = useMemo(() => {
     let result = [...convs];
-    
+
     result.sort((a, b) => {
       const tA = normalizeDate(a.lastMessage?.time || "").getTime();
       const tB = normalizeDate(b.lastMessage?.time || "").getTime();
-      return tB - tA; 
+      return tB - tA;
     });
 
     if (activeFilter === 'unread') result = result.filter(c => c.unreadCount > 0);
@@ -466,7 +475,7 @@ function InboxComponent() {
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
-      const cleanQ = q.replace(/\D/g, ''); 
+      const cleanQ = q.replace(/\D/g, '');
       result = result.filter(c => {
         const numOnly = c.remoteJid.split('@')[0];
         const matchString = c.remoteJid.toLowerCase().includes(q);
@@ -492,7 +501,7 @@ function InboxComponent() {
     setIsAtBottom(scrollHeight - scrollTop - clientHeight < 50);
   };
 
-  useEffect(() => { 
+  useEffect(() => {
     if (isAtBottom && messages.length > 0) {
       setTimeout(() => scrollToBottom("smooth"), 100);
     }
@@ -504,79 +513,147 @@ function InboxComponent() {
     } else {
       setPeer(jid);
       setConvs(prev => prev.map(c => c.remoteJid === jid ? { ...c, unreadCount: 0 } : c));
-      setMsgLimit(100);
+      setHasMoreMsgs(true);
       setAttachOpen(false);
-      setMessages([]); 
+      setMessages([]);
       setTimeout(() => { scrollToBottom("auto"); setIsAtBottom(true); }, 100);
-      apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: jid }) }).catch((e) => {} );
+      apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: jid }) }).catch((e) => { });
     }
   };
 
   const loadLeads = async () => {
-    try { 
-      const res = await apiFetch<{ ok: true; data: LeadRow[] }>("/leads?limit=1000"); 
-      setLeads(res.data || []); 
-    } catch (e) {} 
+    try {
+      const res = await apiFetch<{ ok: true; data: LeadRow[] }>("/leads?limit=1000");
+      setLeads(res.data || []);
+    } catch (e) { }
   };
 
   const loadCampaigns = async () => {
-    try { 
-      const res = await apiFetch<{ ok: true; data: any[] }>("/followup/campaigns?status=active"); 
-      setCampaigns(res.data || []); 
-      if (res.data && res.data.length > 0) setFuPayload(p => ({ ...p, campaignId: String(res.data[0].id) })); 
-    } catch (e) {} 
+    try {
+      const res = await apiFetch<{ ok: true; data: any[] }>("/followup/campaigns?status=active");
+      setCampaigns(res.data || []);
+      if (res.data && res.data.length > 0) setFuPayload(p => ({ ...p, campaignId: String(res.data[0].id) }));
+    } catch (e) { }
   };
 
   const loadSessions = async () => {
-    try { 
-      const res = await apiFetch<{ ok: true; sessions: any[] }>("/ui/sessions"); 
-      const list = (res.sessions || []).map(s => ({ session_key: s.session_key, status: s.status })); 
-      setSessions(list); 
+    try {
+      const res = await apiFetch<{ ok: true; sessions: any[] }>("/ui/sessions");
+      const list = (res.sessions || []).map(s => ({ session_key: s.session_key, status: s.status }));
+      setSessions(list);
       if (!sessionKey && list.length > 0) setSessionKey(list[0].session_key);
     } catch (e: any) { setErr(e.message); } finally { setIsAppLoading(false); }
   };
 
   const loadConvs = useCallback(async (sk: string) => {
-    try { 
-      const res = await apiFetch<{ ok: true; conversations: ConvRow[] }>(`/ui/conversations?sessionKey=${encodeURIComponent(sk)}`); 
-      const deduped = dedupeByRemoteJid(res.conversations || []); 
+    try {
+      const res = await apiFetch<{ ok: true; conversations: ConvRow[] }>(`/ui/conversations?sessionKey=${encodeURIComponent(sk)}`);
+      const deduped = dedupeByRemoteJid(res.conversations || []);
       setConvs(deduped.map(c => {
-         if (c.remoteJid === activePeerRef.current) return { ...c, unreadCount: 0 };
-         return c;
+        if (c.remoteJid === activePeerRef.current) return { ...c, unreadCount: 0 };
+        return c;
       }));
     } catch (e: any) { setErr(e.message); }
   }, []);
 
-  const loadMessages = useCallback(async (sk: string, p: string, limit: number) => {
+  const loadMessages = useCallback(async (sk: string, p: string, cursor?: string) => {
     try {
-      const res = await apiFetch<{ ok: true; remoteJid: string; messages: MsgRow[] }>(`/ui/messages?sessionKey=${encodeURIComponent(sk)}&peer=${encodeURIComponent(p)}&limit=${limit}`);
+      const url = `/ui/messages?sessionKey=${encodeURIComponent(sk)}&peer=${encodeURIComponent(p)}&limit=30${cursor ? `&cursor=${cursor}` : ''}`;
+      const res = await apiFetch<{ ok: true; remoteJid: string; messages: MsgRow[], nextCursor?: string }>(url);
       setMessages(prev => {
         const newMsgs = res.messages || [];
-        if (prev.length !== newMsgs.length || prev.length === 0) return newMsgs;
-        let hasChanges = false;
-        for (let i = 0; i < prev.length; i++) {
-          if (prev[i].id !== newMsgs[i].id || prev[i].status !== newMsgs[i].status) { hasChanges = true; break; }
+        if (cursor) {
+          return [...newMsgs, ...prev]; // Prepend older messages
         }
-        return hasChanges ? newMsgs : prev;
+        return newMsgs; // Initial load
       });
+      setHasMoreMsgs(!!res.nextCursor && (res.messages || []).length > 0);
     } catch (e: any) { setErr(e.message); }
   }, []);
 
   useEffect(() => { loadSessions(); loadLeads(); loadCampaigns(); }, []);
 
+  // Initial Data Load (Conversations)
   useEffect(() => {
     if (!sessionKey) return;
-    loadConvs(sessionKey); 
-    const intervalId = setInterval(() => { loadConvs(sessionKey); }, 5000);
-    return () => clearInterval(intervalId);
+    loadConvs(sessionKey);
   }, [sessionKey, loadConvs]);
 
+  // Initial Message Load for active peer
   useEffect(() => {
     if (!sessionKey || !peer) return;
-    loadMessages(sessionKey, peer, msgLimit); 
-    const intervalId = setInterval(() => { loadMessages(sessionKey, peer, msgLimit); }, 3000);
-    return () => clearInterval(intervalId);
-  }, [sessionKey, peer, msgLimit, loadMessages]);
+    loadMessages(sessionKey, peer);
+  }, [sessionKey, peer, loadMessages]);
+
+  // SSE (Server-Sent Events) Setup
+  useEffect(() => {
+    if (!sessionKey) return;
+
+    // Connect to SSE stream
+    const sse = new EventSource(`/api/ui/stream?sessionKey=${encodeURIComponent(sessionKey)}`);
+
+    sse.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data && data.id) {
+          // 1. Update Messages if looking at this peer
+          if (data.remoteJid === activePeerRef.current) {
+            setMessages(prev => {
+              // Prevent duplicates
+              if (prev.find(m => m.id === data.id)) return prev;
+              const newMsg = {
+                id: data.id, direction: data.direction, type: data.type,
+                text: data.text, media: data.mediaUrl ? { url: data.mediaUrl } : null,
+                location: null, status: data.status, error: null, time: data.time
+              };
+              // Persistently mark as read if we are looking at this chat and it's an incoming message
+              if (data.direction === 'in') {
+                apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: data.remoteJid }) }).catch(() => { });
+              }
+              return [...prev, newMsg];
+            });
+            setTimeout(() => scrollToBottom("smooth"), 100);
+          }
+
+          // 2. Update Conversations list (move to top & update unread)
+          setConvs(prev => {
+            const existingIdx = prev.findIndex(c => c.remoteJid === data.remoteJid);
+            const isUnread = data.direction === 'in' && data.remoteJid !== activePeerRef.current;
+
+            let updatedConv: ConvRow;
+            if (existingIdx >= 0) {
+              updatedConv = {
+                ...prev[existingIdx],
+                unreadCount: isUnread ? prev[existingIdx].unreadCount + 1 : prev[existingIdx].unreadCount,
+                lastMessage: {
+                  id: data.id, direction: data.direction, type: data.type,
+                  text: data.text, mediaUrl: data.mediaUrl, time: data.time, status: data.status
+                }
+              };
+              const newArr = [...prev];
+              newArr.splice(existingIdx, 1);
+              newArr.unshift(updatedConv);
+              return newArr;
+            } else {
+              // New conversation
+              updatedConv = {
+                chatId: 0, remoteJid: data.remoteJid, unreadCount: isUnread ? 1 : 0,
+                lastMessage: {
+                  id: data.id, direction: data.direction, type: data.type,
+                  text: data.text, mediaUrl: data.mediaUrl, time: data.time, status: data.status
+                }
+              };
+              return [updatedConv, ...prev];
+            }
+          });
+        }
+      } catch (e) { }
+    };
+
+    return () => {
+      sse.close();
+    };
+  }, [sessionKey, scrollToBottom]);
 
   async function sendText() {
     if (!text.trim() || sending) return;
@@ -584,14 +661,14 @@ function InboxComponent() {
     try {
       await apiFetch(`/messages/send`, { method: "POST", body: JSON.stringify({ sessionKey, to: peer, text: text.trim() }) });
       setText("");
-      await loadMessages(sessionKey, peer, msgLimit);
-      await loadConvs(sessionKey);
+      // SSE will handle the message appearing, but we can optimistically reload if needed
+      // await loadMessages(sessionKey, peer);
       scrollToBottom("smooth");
     } catch (e: any) { alert("Operasi Distribusi Gagal: " + e.message); } finally { setSending(false); }
   }
 
-  const togglePeerSelection = (jid: string) => { 
-    setSelectedPeers(p => p.includes(jid) ? p.filter(x => x !== jid) : [...p, jid]); 
+  const togglePeerSelection = (jid: string) => {
+    setSelectedPeers(p => p.includes(jid) ? p.filter(x => x !== jid) : [...p, jid]);
   };
 
   // ============================================================================
@@ -603,7 +680,7 @@ function InboxComponent() {
       message: `Ingin menambahkan ${targets.length} kontak terpilih ke Database Leads Utama CRM?`,
       confirmText: "Ya, Tambahkan"
     });
-    
+
     if (!isConfirmed) return;
 
     try {
@@ -629,58 +706,58 @@ function InboxComponent() {
       confirmText: "Hapus Permanen",
       isDanger: true
     });
-    
+
     if (!isConfirmed) return;
 
-    try { 
-      await apiFetch("/ui/conversations/delete", { method: "POST", body: JSON.stringify({ sessionKey, peers: selectedPeers }) }); 
-      if (selectedPeers.includes(peer)) setPeer(""); 
-      setSelectedPeers([]); setIsSelectionMode(false); loadConvs(sessionKey); 
+    try {
+      await apiFetch("/ui/conversations/delete", { method: "POST", body: JSON.stringify({ sessionKey, peers: selectedPeers }) });
+      if (selectedPeers.includes(peer)) setPeer("");
+      setSelectedPeers([]); setIsSelectionMode(false); loadConvs(sessionKey);
     } catch (e: any) { alert("Gagal: " + e.message); }
   }
 
   async function executeScheduleBroadcast() {
     if (!bcPayload.text.trim()) return alert("Teks tidak boleh kosong.");
-    try { 
-      const cleanTargets = bcModal.targets.map(t => t.split('@')[0]); 
-      await apiFetch("/broadcast/create", { method: "POST", body: JSON.stringify({ sessionKey, text: bcPayload.text, delayMs: Number(bcPayload.delay), name: `Broadcast Manual Inbox`, targets: cleanTargets }) }); 
-      setBcModal({ open: false, targets: [] }); setBcPayload({ text: "", delay: "2000" }); setSelectedPeers([]); setIsSelectionMode(false); 
-      alert(`Eksekusi Disetujui! Menyapa ${cleanTargets.length} tujuan.`); 
+    try {
+      const cleanTargets = bcModal.targets.map(t => t.split('@')[0]);
+      await apiFetch("/broadcast/create", { method: "POST", body: JSON.stringify({ sessionKey, text: bcPayload.text, delayMs: Number(bcPayload.delay), name: `Broadcast Manual Inbox`, targets: cleanTargets }) });
+      setBcModal({ open: false, targets: [] }); setBcPayload({ text: "", delay: "2000" }); setSelectedPeers([]); setIsSelectionMode(false);
+      alert(`Eksekusi Disetujui! Menyapa ${cleanTargets.length} tujuan.`);
     } catch (e: any) { alert("Gagal: " + e.message); }
   }
 
   async function executeAddToFollowUp() {
     if (!fuPayload.campaignId) return alert("Pilih Campaign.");
-    try { 
-      const cleanTargets = fuModal.targets.map(t => t.split('@')[0]); 
-      await apiFetch("/followup/add-targets", { method: "POST", body: JSON.stringify({ sessionKey, campaignId: fuPayload.campaignId, targets: cleanTargets }) }); 
-      setFuModal({ open: false, targets: [] }); setSelectedPeers([]); setIsSelectionMode(false); 
-      alert(`Sukses disuntikkan ke Follow Up.`); 
+    try {
+      const cleanTargets = fuModal.targets.map(t => t.split('@')[0]);
+      await apiFetch("/followup/add-targets", { method: "POST", body: JSON.stringify({ sessionKey, campaignId: fuPayload.campaignId, targets: cleanTargets }) });
+      setFuModal({ open: false, targets: [] }); setSelectedPeers([]); setIsSelectionMode(false);
+      alert(`Sukses disuntikkan ke Follow Up.`);
     } catch (e: any) { alert("Gagal: " + e.message); }
   }
 
   async function executeSetLabel() {
     if (!labelPayload.name.trim()) return;
-    try { 
-      setCustomLabels(prev => { 
-        const next = { ...prev }; 
-        labelModal.targets.forEach(t => { next[t.split('@')[0]] = { name: labelPayload.name, color: labelPayload.color }; }); 
-        return next; 
-      }); 
-      apiFetch("/leads/label", { method: "POST", body: JSON.stringify({ targets: labelModal.targets.map(t => t.split('@')[0]), label: labelPayload.name, color: labelPayload.color }) }).catch(()=>{} ); 
-      setLabelModal({ open: false, targets: [] }); setSelectedPeers([]); setIsSelectionMode(false); 
+    try {
+      setCustomLabels(prev => {
+        const next = { ...prev };
+        labelModal.targets.forEach(t => { next[t.split('@')[0]] = { name: labelPayload.name, color: labelPayload.color }; });
+        return next;
+      });
+      apiFetch("/leads/label", { method: "POST", body: JSON.stringify({ targets: labelModal.targets.map(t => t.split('@')[0]), label: labelPayload.name, color: labelPayload.color }) }).catch(() => { });
+      setLabelModal({ open: false, targets: [] }); setSelectedPeers([]); setIsSelectionMode(false);
     } catch (e: any) { alert("Gagal: " + e.message); }
   }
 
   const removeLabel = async (targetNum: string, e: React.MouseEvent) => {
-    e.stopPropagation(); 
-    
+    e.stopPropagation();
+
     const isConfirmed = await confirm({
       title: "Cabut Label",
       message: "Apakah Anda yakin ingin mencabut label dari kontak ini?",
       confirmText: "Ya, Cabut Label"
     });
-    
+
     if (!isConfirmed) return;
 
     setCustomLabels(prev => { const next = { ...prev }; delete next[targetNum]; return next; });
@@ -694,8 +771,8 @@ function InboxComponent() {
       const payload = isLoc ? { sessionKey, to: peer, latitude: Number(mediaPayload.lat), longitude: Number(mediaPayload.lng) } : { sessionKey, to: peer, type: mediaModal.type, url: mediaPayload.url, caption: mediaPayload.caption };
       const endpoint = isLoc ? '/messages/send-location' : '/messages/send-media';
       await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
-      setMediaModal({ open: false, type: 'image' }); setMediaPayload({ url: "", caption: "", lat: "", lng: "" }); 
-      loadMessages(sessionKey, peer, msgLimit); 
+      setMediaModal({ open: false, type: 'image' }); setMediaPayload({ url: "", caption: "", lat: "", lng: "" });
+      // SSE handles new message
     } catch (e: any) { alert("Kesalahan Transmisi Media: " + e.message); } finally { setSending(false); }
   }
 
@@ -714,7 +791,7 @@ function InboxComponent() {
 
   return (
     <div className="flex h-full bg-white overflow-hidden rounded-2xl border border-slate-100 shadow-sm relative">
-      
+
       {/* SIDEBAR (DAFTAR CHAT) - Responsif untuk HP */}
       <div className={`w-full md:w-[350px] lg:w-[400px] flex flex-col border-r border-slate-100 bg-[#f8fafd] shrink-0 h-full ${peer ? 'hidden md:flex' : 'flex'}`}>
         <div className="px-5 pt-5 pb-3 shrink-0">
@@ -730,30 +807,30 @@ function InboxComponent() {
               </select>
             </div>
             <button onClick={() => { setIsSelectionMode(!isSelectionMode); setSelectedPeers([]); }} className={`w-10 h-10 rounded-full flex items-center justify-center transition-all ${isSelectionMode ? 'bg-[#001d35] text-white hover:bg-[#001d35]/90' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}>
-              {isSelectionMode ? <X size={18} strokeWidth={2.5}/> : <CheckCheck size={18} strokeWidth={2.5}/>}
+              {isSelectionMode ? <X size={18} strokeWidth={2.5} /> : <CheckCheck size={18} strokeWidth={2.5} />}
             </button>
           </div>
 
           <div className="relative mb-3">
             <input value={searchQuery} onChange={(e) => setSearchQuery(e.target.value)} placeholder="Telusuri chat..." className="w-full pl-11 pr-10 py-3 rounded-full bg-white border border-slate-200 text-sm font-medium outline-none focus:border-[#0b57d0] focus:ring-2 focus:ring-[#c2e7ff] transition-all shadow-sm" />
             <Search size={16} className="absolute left-4 top-3.5 text-slate-400" />
-            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-0.5"><X size={12} strokeWidth={3}/></button>}
+            {searchQuery && <button onClick={() => setSearchQuery('')} className="absolute right-3 top-3.5 text-slate-400 hover:text-slate-600 bg-slate-100 rounded-full p-0.5"><X size={12} strokeWidth={3} /></button>}
           </div>
-          
+
           <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
-             <button onClick={() => setActiveFilter('all')} className={`shrink-0 px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all ${activeFilter === 'all' ? 'bg-[#c2e7ff] text-[#001d35]' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}>Semua</button>
-             <button onClick={() => setActiveFilter('unread')} className={`shrink-0 px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 ${activeFilter === 'unread' ? 'bg-[#c2e7ff] text-[#001d35]' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}><div className={`w-1.5 h-1.5 rounded-full ${activeFilter === 'unread' ? 'bg-[#001d35]' : 'bg-emerald-500'}`}></div>Unread</button>
-             {uniqueLabels.map(l => (
-               <button key={l.name} onClick={() => setActiveFilter(`label_${l.name}`)} className={`shrink-0 px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5 ${activeFilter === `label_${l.name}` ? 'bg-[#001d35] text-white border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><Tag size={10} /> {l.name}</button>
-             ))}
+            <button onClick={() => setActiveFilter('all')} className={`shrink-0 px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all ${activeFilter === 'all' ? 'bg-[#c2e7ff] text-[#001d35]' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}>Semua</button>
+            <button onClick={() => setActiveFilter('unread')} className={`shrink-0 px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all flex items-center gap-1.5 ${activeFilter === 'unread' ? 'bg-[#c2e7ff] text-[#001d35]' : 'bg-white text-slate-600 border border-slate-200 hover:bg-slate-50'}`}><div className={`w-1.5 h-1.5 rounded-full ${activeFilter === 'unread' ? 'bg-[#001d35]' : 'bg-emerald-500'}`}></div>Unread</button>
+            {uniqueLabels.map(l => (
+              <button key={l.name} onClick={() => setActiveFilter(`label_${l.name}`)} className={`shrink-0 px-3.5 py-1.5 rounded-full text-[11px] font-bold transition-all border flex items-center gap-1.5 ${activeFilter === `label_${l.name}` ? 'bg-[#001d35] text-white border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}><Tag size={10} /> {l.name}</button>
+            ))}
           </div>
         </div>
 
         <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 scrollbar-hide pb-24">
           {filteredConvs.length === 0 && (
             <div className="flex flex-col items-center justify-center h-full text-slate-400 opacity-80">
-               <MessageSquare size={40} className="mb-3 text-slate-300" strokeWidth={1.5} />
-               <p className="font-medium text-sm">Tidak ada percakapan.</p>
+              <MessageSquare size={40} className="mb-3 text-slate-300" strokeWidth={1.5} />
+              <p className="font-medium text-sm">Tidak ada percakapan.</p>
             </div>
           )}
 
@@ -768,7 +845,7 @@ function InboxComponent() {
             const isUnread = c.unreadCount > 0;
             const isOutMsg = c.lastMessage?.direction === 'out';
             const groupSenderPrefix = isGroup && !isOutMsg && c.lastMessage?.pushName ? `${c.lastMessage.pushName}: ` : '';
-            
+
             return (
               <div key={c.remoteJid} onClick={() => handleSelectChat(c.remoteJid)} className={`p-3.5 flex items-center gap-3.5 rounded-2xl cursor-pointer transition-colors relative group ${isActive ? "bg-[#c2e7ff]" : isSelected ? "bg-blue-50" : "hover:bg-slate-100/80"}`}>
                 {isSelectionMode ? (
@@ -794,7 +871,7 @@ function InboxComponent() {
                     </p>
                     {isUnread && !isSelectionMode && <div className="min-w-[20px] h-[20px] rounded-full bg-emerald-500 text-white text-[10px] flex items-center justify-center font-bold px-1.5 shrink-0">{c.unreadCount > 99 ? '99+' : c.unreadCount}</div>}
                   </div>
-                  
+
                   {(isGroup || lLabel || isLead) && (
                     <div className="flex flex-wrap items-center gap-1.5 mt-1.5">
                       {isGroup && <span className="px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider bg-slate-200 text-slate-600">Grup</span>}
@@ -811,15 +888,15 @@ function InboxComponent() {
         {/* SELECTION ACTION BAR */}
         {isSelectionMode && selectedPeers.length > 0 && (
           <div className="absolute bottom-6 left-1/2 -translate-x-1/2 bg-[#001d35] rounded-full p-2.5 shadow-xl flex items-center gap-2 animate-in slide-in-from-bottom-10 z-50 whitespace-nowrap">
-             <span className="text-[11px] font-bold text-[#c2e7ff] px-3">{selectedPeers.length} Dipilih</span>
-             <div className="flex gap-1.5">
-                <button onClick={() => executeMakeLead(selectedPeers)} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Jadikan Lead CRM"><UserPlus size={16}/></button>
-                <button onClick={() => setLabelModal({ open: true, targets: selectedPeers })} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Atur Tag"><Tag size={16}/></button>
-                <button onClick={() => setBcModal({ open: true, targets: selectedPeers })} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Kirim Pesan Massal"><Megaphone size={16}/></button>
-                <button onClick={() => setFuModal({ open: true, targets: selectedPeers })} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Auto Follow Up"><CalendarClock size={16}/></button>
-                <div className="w-[1px] h-6 bg-white/20 mx-1 self-center"></div>
-                <button onClick={executeDeleteChats} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-rose-500/20 text-rose-400 transition-colors" title="Hapus Chat"><Trash2 size={16}/></button>
-             </div>
+            <span className="text-[11px] font-bold text-[#c2e7ff] px-3">{selectedPeers.length} Dipilih</span>
+            <div className="flex gap-1.5">
+              <button onClick={() => executeMakeLead(selectedPeers)} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Jadikan Lead CRM"><UserPlus size={16} /></button>
+              <button onClick={() => setLabelModal({ open: true, targets: selectedPeers })} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Atur Tag"><Tag size={16} /></button>
+              <button onClick={() => setBcModal({ open: true, targets: selectedPeers })} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Kirim Pesan Massal"><Megaphone size={16} /></button>
+              <button onClick={() => setFuModal({ open: true, targets: selectedPeers })} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-white/20 text-white transition-colors" title="Auto Follow Up"><CalendarClock size={16} /></button>
+              <div className="w-[1px] h-6 bg-white/20 mx-1 self-center"></div>
+              <button onClick={executeDeleteChats} className="w-10 h-10 flex items-center justify-center rounded-full hover:bg-rose-500/20 text-rose-400 transition-colors" title="Hapus Chat"><Trash2 size={16} /></button>
+            </div>
           </div>
         )}
       </div>
@@ -827,7 +904,7 @@ function InboxComponent() {
       {/* AREA KANAN: RUANG OBROLAN - Responsif untuk HP */}
       {peer ? (
         <div className={`flex-1 flex flex-col relative bg-white min-w-0 ${peer ? 'flex' : 'hidden md:flex'}`}>
-          
+
           {/* HEADER CHAT */}
           <div className="h-[72px] px-4 md:px-6 flex items-center border-b border-slate-100 bg-white shrink-0 justify-between z-10">
             <div className="flex items-center min-w-0">
@@ -859,8 +936,19 @@ function InboxComponent() {
               <div className="bg-[#f0f4f9] text-[#444746] text-[11px] font-medium px-4 py-2 rounded-lg text-center max-w-sm">
                 🔒 Pesan diamankan melalui integrasi sistem Baileys.
               </div>
-              {messages.length >= msgLimit && (
-                <button onClick={() => { setMsgLimit(m => m + 100); setIsAtBottom(false); }} className="mt-4 px-4 py-2 bg-white border border-slate-200 text-[#0b57d0] font-bold text-[11px] uppercase tracking-wider rounded-full hover:bg-[#f8fafd] shadow-sm transition-colors"><Clock size={14} className="inline mr-1.5" /> Muat Riwayat Sebelumnya</button>
+              {hasMoreMsgs && messages.length > 0 && (
+                <button
+                  onClick={async () => {
+                    setLoadingMore(true);
+                    await loadMessages(sessionKey, peer, String(messages[0].id));
+                    setLoadingMore(false);
+                  }}
+                  disabled={loadingMore}
+                  className="mt-4 px-4 py-2 bg-white border border-slate-200 text-[#0b57d0] font-bold text-[11px] uppercase tracking-wider rounded-full hover:bg-[#f8fafd] shadow-sm transition-colors disabled:opacity-50"
+                >
+                  {loadingMore ? <Loader2 size={14} className="inline mr-1.5 animate-spin" /> : <Clock size={14} className="inline mr-1.5" />}
+                  Muat Riwayat Sebelumnya
+                </button>
               )}
             </div>
             {messages.map((m) => (
@@ -902,9 +990,9 @@ function InboxComponent() {
             <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"><Tag size={20} className="text-[#0b57d0]" /> Atur Label</h3>
             <p className="text-sm text-slate-500 mb-4">Pilih atau buat label untuk {labelModal.targets.length} kontak terpilih.</p>
             {uniqueLabels.length > 0 && (
-              <div className="mb-4"><div className="flex flex-wrap gap-1.5">{uniqueLabels.map(l => (<button key={l.name} onClick={() => setLabelPayload({name: l.name, color: l.color})} className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider text-white transition-all ${l.color} ${labelPayload.name === l.name ? 'ring-2 ring-offset-2 ring-[#0b57d0]' : 'opacity-90 hover:opacity-100'}`}>{l.name}</button>))}</div></div>
+              <div className="mb-4"><div className="flex flex-wrap gap-1.5">{uniqueLabels.map(l => (<button key={l.name} onClick={() => setLabelPayload({ name: l.name, color: l.color })} className={`px-3 py-1.5 rounded-full text-[11px] font-bold uppercase tracking-wider text-white transition-all ${l.color} ${labelPayload.name === l.name ? 'ring-2 ring-offset-2 ring-[#0b57d0]' : 'opacity-90 hover:opacity-100'}`}>{l.name}</button>))}</div></div>
             )}
-            <div className="mb-6"><input value={labelPayload.name} onChange={(e)=>setLabelPayload({...labelPayload, name: e.target.value})} placeholder="Nama Label Baru..." className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 mb-3 focus:ring-2 focus:ring-[#c2e7ff] transition-all" /><div className="flex flex-wrap gap-2 justify-between">{LABEL_COLORS.map(color => (<button key={color} onClick={() => setLabelPayload({...labelPayload, color})} className={`w-6 h-6 rounded-full transition-transform ${color} ${labelPayload.color === color ? 'ring-2 ring-offset-2 ring-[#0b57d0] scale-110' : 'opacity-50 hover:opacity-100 hover:scale-110'}`} />))}</div></div>
+            <div className="mb-6"><input value={labelPayload.name} onChange={(e) => setLabelPayload({ ...labelPayload, name: e.target.value })} placeholder="Nama Label Baru..." className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 mb-3 focus:ring-2 focus:ring-[#c2e7ff] transition-all" /><div className="flex flex-wrap gap-2 justify-between">{LABEL_COLORS.map(color => (<button key={color} onClick={() => setLabelPayload({ ...labelPayload, color })} className={`w-6 h-6 rounded-full transition-transform ${color} ${labelPayload.color === color ? 'ring-2 ring-offset-2 ring-[#0b57d0] scale-110' : 'opacity-50 hover:opacity-100 hover:scale-110'}`} />))}</div></div>
             <div className="flex gap-2 justify-end"><button onClick={() => setLabelModal({ open: false, targets: [] })} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] transition-colors text-sm">Batal</button><button onClick={executeSetLabel} className="px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] transition-colors text-sm">Simpan</button></div>
           </div>
         </div>
@@ -916,17 +1004,17 @@ function InboxComponent() {
             <h3 className="text-xl font-bold text-slate-800 mb-2 flex items-center gap-2"><Megaphone size={20} className="text-[#0b57d0]" /> Kirim Pesan Massal</h3>
             <p className="text-sm text-slate-500 mb-4">Akan dikirimkan ke {bcModal.targets.length} nomor tujuan.</p>
             <div className="overflow-y-auto mb-4">
-              <textarea rows={5} value={bcPayload.text} onChange={(e)=>setBcPayload({...bcPayload, text: e.target.value})} placeholder="Ketik pesan broadcast..." className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 resize-none focus:ring-2 focus:ring-[#c2e7ff] transition-all mb-4" />
+              <textarea rows={5} value={bcPayload.text} onChange={(e) => setBcPayload({ ...bcPayload, text: e.target.value })} placeholder="Ketik pesan broadcast..." className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 resize-none focus:ring-2 focus:ring-[#c2e7ff] transition-all mb-4" />
               <div className="flex items-center justify-between bg-slate-50 p-3 rounded-xl border border-slate-100">
                 <span className="text-xs font-bold text-slate-600">Jeda (Ms)</span>
-                <input type="number" value={bcPayload.delay} onChange={(e)=>setBcPayload({...bcPayload, delay: e.target.value})} className="w-20 text-center px-2 py-1 bg-white border border-slate-200 rounded-lg outline-none font-medium text-sm" />
+                <input type="number" value={bcPayload.delay} onChange={(e) => setBcPayload({ ...bcPayload, delay: e.target.value })} className="w-20 text-center px-2 py-1 bg-white border border-slate-200 rounded-lg outline-none font-medium text-sm" />
               </div>
             </div>
             <div className="flex gap-2 justify-end mt-2"><button onClick={() => setBcModal({ open: false, targets: [] })} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] transition-colors text-sm">Batal</button><button onClick={executeScheduleBroadcast} className="px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] transition-colors text-sm flex items-center gap-2"><Check size={16} /> Kirim</button></div>
           </div>
         </div>
       )}
-      
+
       {fuModal.open && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-xl animate-in zoom-in-95 duration-200">
@@ -934,7 +1022,7 @@ function InboxComponent() {
             <p className="text-sm text-slate-500 mb-4">Daftarkan {fuModal.targets.length} prospek ke workflow.</p>
             <div className="mb-6">
               {campaigns.length > 0 ? (
-                <select value={fuPayload.campaignId} onChange={(e)=>setFuPayload({...fuPayload, campaignId: e.target.value})} className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 appearance-none cursor-pointer focus:ring-2 focus:ring-[#c2e7ff]">
+                <select value={fuPayload.campaignId} onChange={(e) => setFuPayload({ ...fuPayload, campaignId: e.target.value })} className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 appearance-none cursor-pointer focus:ring-2 focus:ring-[#c2e7ff]">
                   <option value="">Pilih Campaign...</option>
                   {campaigns.map(c => (<option key={c.id} value={c.id}>{c.name}</option>))}
                 </select>
@@ -953,16 +1041,16 @@ function InboxComponent() {
             <h3 className="text-xl font-bold text-slate-800 mb-4 flex items-center gap-2"><Paperclip size={20} className="text-[#0b57d0]" /> Sisipkan Lampiran</h3>
             {mediaModal.type === 'location' ? (
               <div className="space-y-3 mb-6">
-                <input value={mediaPayload.lat} onChange={(e)=>setMediaPayload({...mediaPayload, lat: e.target.value})} placeholder="Latitude" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
-                <input value={mediaPayload.lng} onChange={(e)=>setMediaPayload({...mediaPayload, lng: e.target.value})} placeholder="Longitude" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
+                <input value={mediaPayload.lat} onChange={(e) => setMediaPayload({ ...mediaPayload, lat: e.target.value })} placeholder="Latitude" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
+                <input value={mediaPayload.lng} onChange={(e) => setMediaPayload({ ...mediaPayload, lng: e.target.value })} placeholder="Longitude" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
               </div>
             ) : (
               <div className="space-y-3 mb-6">
-                <input value={mediaPayload.url} onChange={(e)=>setMediaPayload({...mediaPayload, url: e.target.value})} placeholder="URL Lampiran Publik" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
-                <input value={mediaPayload.caption} onChange={(e)=>setMediaPayload({...mediaPayload, caption: e.target.value})} placeholder="Keterangan (Opsional)" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
+                <input value={mediaPayload.url} onChange={(e) => setMediaPayload({ ...mediaPayload, url: e.target.value })} placeholder="URL Lampiran Publik" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
+                <input value={mediaPayload.caption} onChange={(e) => setMediaPayload({ ...mediaPayload, caption: e.target.value })} placeholder="Keterangan (Opsional)" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
               </div>
             )}
-            <div className="flex gap-2 justify-end"><button onClick={() => setMediaModal({ open: false, type: 'image' })} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] transition-colors text-sm">Batal</button><button onClick={executeSendMedia} disabled={sending} className="px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] disabled:bg-slate-300 transition-colors text-sm flex items-center gap-2">{sending ? <Loader2 size={16} className="animate-spin"/> : <Send size={16}/>} Kirim</button></div>
+            <div className="flex gap-2 justify-end"><button onClick={() => setMediaModal({ open: false, type: 'image' })} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] transition-colors text-sm">Batal</button><button onClick={executeSendMedia} disabled={sending} className="px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] disabled:bg-slate-300 transition-colors text-sm flex items-center gap-2">{sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Kirim</button></div>
           </div>
         </div>
       )}

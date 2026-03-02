@@ -38,9 +38,9 @@ import { enqueueWebhook } from "./webhook";
 // 1. GLOBAL STATE & INTERFACES
 // ============================================================================
 
-export type QrState = { 
-  qr: string | null; 
-  status: string; 
+export type QrState = {
+  qr: string | null;
+  status: string;
   at: number;
 };
 const qrStateMap = new Map<string, QrState>();
@@ -67,11 +67,11 @@ const sessions = new Map<string, SessionEntry>();
 // FIX ZOMBIE SESSION: Penanda untuk sesi yang sengaja dihentikan/dihapus
 const intentionallyStopped = new Set<string>();
 
-export type SessionMeta = { 
-  status?: string; 
-  qr?: string | null; 
-  phoneNumber?: string | null; 
-  lastSeen?: number | null; 
+export type SessionMeta = {
+  status?: string;
+  qr?: string | null;
+  phoneNumber?: string | null;
+  lastSeen?: number | null;
 };
 const sessionMeta = new Map<string, SessionMeta>();
 
@@ -127,9 +127,9 @@ export async function deleteSessionFolder(sessionKey: string) {
 
 function getDynamicGreeting(): string {
   const d = new Date();
-  d.setHours(d.getUTCHours() + 7); 
+  d.setHours(d.getUTCHours() + 7);
   const h = d.getHours();
-  
+
   if (h >= 3 && h < 11) return "Pagi";
   if (h >= 11 && h < 15) return "Siang";
   if (h >= 15 && h < 18) return "Sore";
@@ -138,12 +138,12 @@ function getDynamicGreeting(): string {
 
 export function parseMessageMagic(rawText: string | null, targetNumber: string, targetName: string | null): string {
   if (!rawText) return "";
-  
+
   let processed = rawText;
 
-  const fallbackName = "Kak"; 
+  const fallbackName = "Kak";
   const finalName = (targetName && targetName.trim() !== "") ? targetName : fallbackName;
-  
+
   processed = processed.replace(/\{\{nama\}\}/ig, finalName);
   processed = processed.replace(/\{nama\}/ig, finalName);
 
@@ -160,7 +160,7 @@ export function parseMessageMagic(rawText: string | null, targetNumber: string, 
     const options = match[1].split('|');
     const choice = options[Math.floor(Math.random() * options.length)];
     processed = processed.replace(match[0], choice);
-    spintaxRegex.lastIndex = 0; 
+    spintaxRegex.lastIndex = 0;
   }
 
   return processed;
@@ -185,7 +185,7 @@ function parseContent(webMsg: proto.IWebMessageInfo): ParsedContent | null {
 
   if (raw.conversation) return { type: "text", text: raw.conversation };
   if (raw.extendedTextMessage?.text) return { type: "text", text: raw.extendedTextMessage.text };
-  
+
   if (raw.imageMessage) return { type: "image", text: raw.imageMessage.caption ?? null, mime: raw.imageMessage.mimetype ?? null, fileName: null };
   if (raw.videoMessage) return { type: "video", text: raw.videoMessage.caption ?? null, mime: raw.videoMessage.mimetype ?? null, fileName: null };
   if (raw.documentMessage) return { type: "document", text: raw.documentMessage.caption ?? null, mime: raw.documentMessage.mimetype ?? null, fileName: raw.documentMessage.fileName ?? null };
@@ -237,7 +237,7 @@ async function upsertSession(tenantId: number, userId: number, sessionKey: strin
 
   values.push(tenantId);
   values.push(sessionKey);
-  
+
   await pool.query(
     `UPDATE wa_sessions SET ${fields.join(", ")} WHERE tenant_id=? AND session_key=?`,
     values
@@ -274,12 +274,13 @@ export async function insertMessage(tenantId: number, userId: number, params: {
   mediaMime?: string | null;
   mediaName?: string | null;
 }) {
+  const createdAt = new Date();
   await pool.query(
     `INSERT INTO wa_messages(
       tenant_id, user_id, session_key, chat_id, direction, remote_jid, wa_message_id,
       message_type, text_body, media_mime, media_name,
-      status, error_text, raw_json
-     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      status, error_text, raw_json, created_date
+     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE
       chat_id=COALESCE(VALUES(chat_id), chat_id),
       text_body=COALESCE(VALUES(text_body), text_body),
@@ -287,21 +288,23 @@ export async function insertMessage(tenantId: number, userId: number, params: {
       media_name=COALESCE(VALUES(media_name), media_name),
       status=VALUES(status),
       error_text=VALUES(error_text),
-      raw_json=COALESCE(VALUES(raw_json), raw_json)`,
+      raw_json=COALESCE(VALUES(raw_json), raw_json),
+      created_date=COALESCE(created_date, ?)`,
     [
       tenantId, userId, params.sessionKey, params.chatId ?? null,
       params.direction, params.remoteJid, params.waMessageId, params.messageType,
       params.textBody, params.mediaMime ?? null, params.mediaName ?? null,
-      params.status, params.errorText ?? null, JSON.stringify(params.rawJson)
+      params.status, params.errorText ?? null, JSON.stringify(params.rawJson),
+      createdAt, createdAt
     ]
   );
 
   if (params.direction === 'in') {
-     await pool.query(
-       `UPDATE wa_chats SET unread_count = unread_count + 1 
+    await pool.query(
+      `UPDATE wa_chats SET unread_count = unread_count + 1 
         WHERE tenant_id = ? AND session_key = ? AND remote_jid = ?`,
-       [tenantId, params.sessionKey, params.remoteJid]
-     );
+      [tenantId, params.sessionKey, params.remoteJid]
+    );
   }
 }
 
@@ -312,7 +315,7 @@ export async function insertMessage(tenantId: number, userId: number, params: {
 async function processAutoReply(tenantId: number, sessionKey: string, remoteJid: string, text: string) {
   try {
     let rules: any[] = [];
-    
+
     try {
       [rules] = await pool.query<any[]>(
         `SELECT keyword, match_type, reply_text, delay_ms 
@@ -351,41 +354,41 @@ async function processAutoReply(tenantId: number, sessionKey: string, remoteJid:
         else if (rule.match_type === 'startswith' && txtLower.startsWith(kw)) isMatch = true;
 
         if (isMatch) {
-          matchedWord = kw; 
-          break; 
+          matchedWord = kw;
+          break;
         }
       }
 
       if (isMatch) {
         matchedRule = rule;
         console.log(`[${sessionKey}] 🤖 Auto-Reply Matched: "${matchedWord}" (Rule: "${rule.keyword}") for JID: ${remoteJid}`);
-        break; 
+        break;
       }
     }
 
     if (matchedRule) {
       const delay = matchedRule.delay_ms || 2000;
       const sock = getSessionSock(sessionKey);
-      
+
       const isPresenceSupported = !remoteJid.includes('@lid') && !remoteJid.includes('@broadcast') && !remoteJid.includes('@g.us');
 
       if (sock && isPresenceSupported) {
-         try {
-           await sock.sendPresenceUpdate('composing', remoteJid);
-         } catch (err) {
-           console.warn(`[${sessionKey}] Sinyal composing diabaikan untuk target khusus: ${remoteJid}`);
-         }
+        try {
+          await sock.sendPresenceUpdate('composing', remoteJid);
+        } catch (err) {
+          console.warn(`[${sessionKey}] Sinyal composing diabaikan untuk target khusus: ${remoteJid}`);
+        }
       }
-      
+
       setTimeout(async () => {
-        try { 
+        try {
           const currentSock = getSessionSock(sessionKey);
           if (currentSock && isPresenceSupported) {
-             try { 
-               await currentSock.sendPresenceUpdate('paused', remoteJid); 
-             } catch(e) {}
+            try {
+              await currentSock.sendPresenceUpdate('paused', remoteJid);
+            } catch (e) { }
           }
-          
+
           let contactName = null;
           try {
             const cleanNumber = remoteJid.split("@")[0];
@@ -393,7 +396,7 @@ async function processAutoReply(tenantId: number, sessionKey: string, remoteJid:
               `SELECT name FROM crm_leads WHERE tenant_id = ? AND phone_number = ? LIMIT 1`,
               [tenantId, cleanNumber]
             );
-            
+
             if (leadRows.length > 0 && leadRows[0].name) {
               contactName = leadRows[0].name;
             } else {
@@ -409,11 +412,11 @@ async function processAutoReply(tenantId: number, sessionKey: string, remoteJid:
           } catch (e) { /* ignore */ }
 
           const parsedReply = parseMessageMagic(matchedRule.reply_text, remoteJid.split("@")[0], contactName);
-          await sendText(sessionKey, remoteJid, parsedReply); 
-        } catch (e) { 
-          console.error(`[${sessionKey}] ❌ Auto Reply Send Failed to ${remoteJid}:`, e); 
+          await sendText(sessionKey, remoteJid, parsedReply);
+        } catch (e) {
+          console.error(`[${sessionKey}] ❌ Auto Reply Send Failed to ${remoteJid}:`, e);
         }
-      }, delay); 
+      }, delay);
     }
   } catch (err) {
     console.error(`[${sessionKey}] ❌ Auto Reply Engine Error:`, err);
@@ -439,7 +442,7 @@ async function processFollowUpRepliedTrigger(tenantId: number, sessionKey: strin
 
 export async function startSession(sessionKey: string, ctx: { tenantId: number; userId: number }) {
   if (!ctx || !ctx.tenantId || !ctx.userId) throw new Error("startSession requires ctx {tenantId,userId}");
-  
+
   if (sessions.has(sessionKey) && sessions.get(sessionKey)!.sock) {
     return { ok: true, message: "Session is already active in memory." };
   }
@@ -451,7 +454,7 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
 
   const { state, saveCreds } = await useMultiFileAuthState(dir);
   const { version, isLatest } = await fetchLatestBaileysVersion();
-  
+
   console.log(`[${sessionKey}] 🚀 Booting Baileys v${version.join(".")} (Latest: ${isLatest})`);
 
   const sockLogger = logger.child({ session: sessionKey });
@@ -462,7 +465,7 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
       creds: state.creds,
       keys: makeCacheableSignalKeyStore(state.keys, sockLogger),
     },
-    printQRInTerminal: false, 
+    printQRInTerminal: false,
     logger: sockLogger,
     browser: Browsers.macOS('Desktop'),
     keepAliveIntervalMs: 30000,
@@ -476,11 +479,11 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
     }
   });
 
-  sessions.set(sessionKey, { 
-    ctx: { tenantId: ctx.tenantId, userId: ctx.userId }, 
-    sessionKey, 
-    sock, 
-    status: "connecting" 
+  sessions.set(sessionKey, {
+    ctx: { tenantId: ctx.tenantId, userId: ctx.userId },
+    sessionKey,
+    sock,
+    status: "connecting"
   });
 
   sock.ev.on("creds.update", saveCreds);
@@ -490,15 +493,15 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
 
     if (qr) {
       qrStateMap.set(sessionKey, { qr, status: "qr", at: Date.now() });
-      sessionMeta.set(sessionKey, { ...(sessionMeta.get(sessionKey)||{}), qr, status: "qr", lastSeen: Date.now() });
+      sessionMeta.set(sessionKey, { ...(sessionMeta.get(sessionKey) || {}), qr, status: "qr", lastSeen: Date.now() });
       console.log(`\n[${sessionKey}] === SCAN THIS QR CODE (OR VIEW IN DASHBOARD) ===\n`);
       qrcode.generate(qr, { small: true });
     }
 
     if (connection === "open") {
       qrStateMap.set(sessionKey, { qr: null, status: "connected", at: Date.now() });
-      sessionMeta.set(sessionKey, { ...(sessionMeta.get(sessionKey)||{}), qr: null, status: "connected", lastSeen: Date.now() });
-      
+      sessionMeta.set(sessionKey, { ...(sessionMeta.get(sessionKey) || {}), qr: null, status: "connected", lastSeen: Date.now() });
+
       const me = sock.user?.id ?? null;
       const phoneClean = me ? me.split(":")[0].split("@")[0] : null;
       const waName = sock.user?.name ?? null;
@@ -515,13 +518,13 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
       });
 
       console.log(`[${sessionKey}] ✅ Connected Successfully as +${phoneClean} (${waName})`);
-      enqueueWebhook(ctx.tenantId, "session.update", { sessionKey, status: "connected", phone: phoneClean }).catch(()=>{});
+      enqueueWebhook(ctx.tenantId, "session.update", { sessionKey, status: "connected", phone: phoneClean }).catch(() => { });
     }
 
     if (connection === "close") {
       const prev = qrStateMap.get(sessionKey);
       qrStateMap.set(sessionKey, { qr: prev?.qr || null, status: "disconnected", at: Date.now() });
-      sessionMeta.set(sessionKey, { ...(sessionMeta.get(sessionKey)||{}), status: "disconnected", lastSeen: Date.now() });
+      sessionMeta.set(sessionKey, { ...(sessionMeta.get(sessionKey) || {}), status: "disconnected", lastSeen: Date.now() });
 
       const code = (lastDisconnect?.error as any)?.output?.statusCode;
       const loggedOut = code === DisconnectReason.loggedOut;
@@ -539,11 +542,11 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
       if (intentionallyStopped.has(sessionKey)) {
         console.log(`[${sessionKey}] 🛑 Session was intentionally stopped (Deleted by User). Halting auto-reconnect.`);
         intentionallyStopped.delete(sessionKey); // Bersihkan flag
-        return; 
+        return;
       }
 
       console.warn(`[${sessionKey}] ⚠️ Connection Closed. Reason: ${finalStatus} (Code: ${code})`);
-      enqueueWebhook(ctx.tenantId, "session.update", { sessionKey, status: finalStatus, reason: code }).catch(()=>{});
+      enqueueWebhook(ctx.tenantId, "session.update", { sessionKey, status: finalStatus, reason: code }).catch(() => { });
 
       if (loggedOut) {
         console.log(`[${sessionKey}] 🛑 Session was logged out by user. Halting auto-reconnect.`);
@@ -584,8 +587,8 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
 
           enqueueWebhook(ctx.tenantId, "message.status", {
             sessionKey, messageId: key.id, to: key.remoteJid, status: statusStr
-          }).catch(() => {});
-          
+          }).catch(() => { });
+
         } catch (dbErr) {
           console.error(`[${sessionKey}] ❌ Error updating message status:`, dbErr);
         }
@@ -602,7 +605,7 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
     for (const msg of m.messages) {
       try {
         if (msg.key.fromMe) continue;
-        
+
         // ====================================================================
         // [FIX] EKSTRAKSI NOMOR ASLI DARI LID (PRIVACY BYPASS)
         // Meta sering menyembunyikan nomor dalam format 75123456@lid
@@ -612,10 +615,10 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
         let isLidSourced = false;
 
         if (remoteJid.includes('@lid')) {
-           isLidSourced = true;
-           if (msg.key.participant && msg.key.participant.includes('@s.whatsapp.net')) {
-               remoteJid = msg.key.participant; // Override LID dengan nomor WA asli jika terekspos
-           }
+          isLidSourced = true;
+          if (msg.key.participant && msg.key.participant.includes('@s.whatsapp.net')) {
+            remoteJid = msg.key.participant; // Override LID dengan nomor WA asli jika terekspos
+          }
         }
 
         if (remoteJid === "status@broadcast" || remoteJid.includes("@broadcast") || remoteJid.includes("@newsletter")) {
@@ -623,24 +626,24 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
         }
 
         const isGroup = remoteJid.endsWith("@g.us");
-        if (isGroup) continue; 
+        if (isGroup) continue;
 
         const parsed = parseContent(msg);
-        if (!parsed) continue; 
-        
+        if (!parsed) continue;
+
         const chatId = await upsertChat(ctx.tenantId, sessionKey, remoteJid, "private");
 
         const pushName = msg.pushName || null;
-        
+
         if (pushName && !remoteJid.includes('@lid')) {
-           await pool.query(
-             `INSERT INTO wa_contacts (tenant_id, session_key, jid, display_name, last_message_at, created_at)
+          await pool.query(
+            `INSERT INTO wa_contacts (tenant_id, session_key, jid, display_name, last_message_at, created_at)
               VALUES (?, ?, ?, ?, NOW(), NOW())
               ON DUPLICATE KEY UPDATE 
               display_name = COALESCE(?, display_name),
               last_message_at = NOW()`,
-             [ctx.tenantId, sessionKey, remoteJid, pushName, pushName]
-           );
+            [ctx.tenantId, sessionKey, remoteJid, pushName, pushName]
+          );
         }
 
         // ====================================================================
@@ -648,48 +651,48 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
         // ====================================================================
         const raw = unwrapMessage(msg.message);
         const txtLower = (parsed.text || "").toLowerCase();
-        
-        const quotedId = 
-          raw?.extendedTextMessage?.contextInfo?.stanzaId || 
-          raw?.imageMessage?.contextInfo?.stanzaId || 
-          raw?.videoMessage?.contextInfo?.stanzaId || 
+
+        const quotedId =
+          raw?.extendedTextMessage?.contextInfo?.stanzaId ||
+          raw?.imageMessage?.contextInfo?.stanzaId ||
+          raw?.videoMessage?.contextInfo?.stanzaId ||
           raw?.documentMessage?.contextInfo?.stanzaId || null;
 
         const adReply = raw?.extendedTextMessage?.contextInfo?.adReply || null;
 
         let isBroadcastReply = false;
         let isFollowUpReply = false;
-        
+
         if (quotedId) {
-           const [bcCheck] = await pool.query<any[]>(`SELECT id FROM broadcast_items WHERE wa_message_id = ? LIMIT 1`, [quotedId]);
-           if (bcCheck && bcCheck.length > 0) {
-               isBroadcastReply = true;
-           } else {
-               const [fuCheck] = await pool.query<any[]>(`SELECT id FROM followup_targets WHERE wa_message_id = ? LIMIT 1`, [quotedId]);
-               if (fuCheck && fuCheck.length > 0) {
-                   isFollowUpReply = true;
-               }
-           }
+          const [bcCheck] = await pool.query<any[]>(`SELECT id FROM broadcast_items WHERE wa_message_id = ? LIMIT 1`, [quotedId]);
+          if (bcCheck && bcCheck.length > 0) {
+            isBroadcastReply = true;
+          } else {
+            const [fuCheck] = await pool.query<any[]>(`SELECT id FROM followup_targets WHERE wa_message_id = ? LIMIT 1`, [quotedId]);
+            if (fuCheck && fuCheck.length > 0) {
+              isFollowUpReply = true;
+            }
+          }
         }
 
         // Tentukan Sumber Trafik (Default = 'random')
         let leadSource = 'random';
-        
+
         if (adReply) {
-           const adName = adReply.title || adReply.body || 'Iklan';
-           leadSource = `meta_ads|${adName}`; 
+          const adName = adReply.title || adReply.body || 'Iklan';
+          leadSource = `meta_ads|${adName}`;
         } else if (isBroadcastReply) {
-           leadSource = 'broadcast_reply';
+          leadSource = 'broadcast_reply';
         } else if (isFollowUpReply) {
-           leadSource = 'followup_reply';
+          leadSource = 'followup_reply';
         } else if (txtLower.includes('dari web') || txtLower.includes('dari landing page') || txtLower.includes('dari website')) {
-           leadSource = 'web';
+          leadSource = 'web';
         } else if (txtLower.includes('dari ig') || txtLower.includes('dari instagram')) {
-           leadSource = 'ig';
+          leadSource = 'ig';
         } else if (txtLower.includes('dari tiktok') || txtLower.includes('dari fyp')) {
-           leadSource = 'tiktok';
+          leadSource = 'tiktok';
         } else if (txtLower.includes('dari fb') || txtLower.includes('dari facebook')) {
-           leadSource = 'facebook';
+          leadSource = 'facebook';
         }
 
         const cleanNumber = remoteJid.split("@")[0];
@@ -697,48 +700,48 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
         // --------------------------------------------------------------------
         // [FLEXIBLE SMART ENGINE] Penentuan Suhu Otomatis berdasarkan Rule CS
         // --------------------------------------------------------------------
-        let autoStatus = 'cold'; 
+        let autoStatus = 'cold';
         let tempRules = null;
-        
+
         try {
           const [ruleRows] = await pool.query<any[]>(`SELECT * FROM crm_temp_rules WHERE tenant_id = ? LIMIT 1`, [ctx.tenantId]);
           if (ruleRows.length > 0) tempRules = ruleRows[0];
-        } catch(e) {}
+        } catch (e) { }
 
         if (tempRules) {
-           let isWarm = false;
-           try {
-             const baseSource = leadSource.split('|')[0];
-             const warmSourcesArray = JSON.parse(tempRules.warm_sources || "[]");
-             if (warmSourcesArray.includes(baseSource)) isWarm = true;
+          let isWarm = false;
+          try {
+            const baseSource = leadSource.split('|')[0];
+            const warmSourcesArray = JSON.parse(tempRules.warm_sources || "[]");
+            if (warmSourcesArray.includes(baseSource)) isWarm = true;
 
-             const warmWords = tempRules.warm_keywords ? tempRules.warm_keywords.split(',').map((w:string)=>w.toLowerCase().trim()) : [];
-             for (const ww of warmWords) {
-               if (ww && txtLower.includes(ww)) { isWarm = true; break; }
-             }
-           } catch(e) {}
+            const warmWords = tempRules.warm_keywords ? tempRules.warm_keywords.split(',').map((w: string) => w.toLowerCase().trim()) : [];
+            for (const ww of warmWords) {
+              if (ww && txtLower.includes(ww)) { isWarm = true; break; }
+            }
+          } catch (e) { }
 
-           let isHot = false;
-           try {
-             const baseSource = leadSource.split('|')[0];
-             const hotSourcesArray = JSON.parse(tempRules.hot_sources || "[]");
-             if (hotSourcesArray.includes(baseSource)) isHot = true;
+          let isHot = false;
+          try {
+            const baseSource = leadSource.split('|')[0];
+            const hotSourcesArray = JSON.parse(tempRules.hot_sources || "[]");
+            if (hotSourcesArray.includes(baseSource)) isHot = true;
 
-             const hotWords = tempRules.hot_keywords ? tempRules.hot_keywords.split(',').map((w:string)=>w.toLowerCase().trim()) : [];
-             for (const hw of hotWords) {
-               if (hw && txtLower.includes(hw)) { isHot = true; break; }
-             }
-           } catch(e) {}
+            const hotWords = tempRules.hot_keywords ? tempRules.hot_keywords.split(',').map((w: string) => w.toLowerCase().trim()) : [];
+            for (const hw of hotWords) {
+              if (hw && txtLower.includes(hw)) { isHot = true; break; }
+            }
+          } catch (e) { }
 
-           if (isHot || isBroadcastReply || isFollowUpReply) {
-             autoStatus = 'hot';
-           } else if (isWarm) {
-             autoStatus = 'warm';
-           }
+          if (isHot || isBroadcastReply || isFollowUpReply) {
+            autoStatus = 'hot';
+          } else if (isWarm) {
+            autoStatus = 'warm';
+          }
         } else {
-           autoStatus = 'cold';
-           if (adReply || leadSource !== 'random' && leadSource !== 'organic') autoStatus = 'warm';
-           if (isBroadcastReply || isFollowUpReply || txtLower.includes('pesan') || txtLower.includes('order')) autoStatus = 'hot';
+          autoStatus = 'cold';
+          if (adReply || leadSource !== 'random' && leadSource !== 'organic') autoStatus = 'warm';
+          if (isBroadcastReply || isFollowUpReply || txtLower.includes('pesan') || txtLower.includes('order')) autoStatus = 'hot';
         }
 
         await pool.query(
@@ -780,7 +783,7 @@ export async function startSession(sessionKey: string, ctx: { tenantId: number; 
         try {
           enqueueWebhook(ctx.tenantId, "message.incoming", {
             direction: "in", sessionKey, from: remoteJid, messageId: msg.key.id, messageType: parsed.type, text: parsed.text ?? null
-          }).catch(() => {});
+          }).catch(() => { });
         } catch (hookErr) {
           console.error(`[${sessionKey}] ❌ Webhook trigger error:`, hookErr);
         }
@@ -807,18 +810,18 @@ export function isConnected(sessionKey: string) {
 export async function stopSession(sessionKey: string) {
   // FIX ZOMBIE SESSION: Tambahkan session ini ke daftar hitam agar tidak di-reconnect otomatis
   intentionallyStopped.add(sessionKey);
-  
-  try { 
+
+  try {
     const sock = getSessionSock(sessionKey);
-    if (sock) sock.ws.close(); 
+    if (sock) sock.ws.close();
   } catch (e) {
     console.warn(`[${sessionKey}] ⚠️ Error closing websocket:`, e);
   }
-  
+
   // FIX ZOMBIE SESSION: Pastikan semua state yang ada di memory terkait session ini dihapus bersih
-  try { sessions.delete(sessionKey); } catch {}
-  try { sessionMeta.delete(sessionKey); } catch {}
-  try { qrStateMap.delete(sessionKey); } catch {}
+  try { sessions.delete(sessionKey); } catch { }
+  try { sessionMeta.delete(sessionKey); } catch { }
+  try { qrStateMap.delete(sessionKey); } catch { }
   console.log(`[${sessionKey}] 🛑 Session stopped and flushed from memory.`);
 }
 
@@ -829,17 +832,17 @@ export async function stopSession(sessionKey: string) {
 export async function sendText(sessionKey: string, to: string, text: string) {
   const entry = sessions.get(sessionKey);
   const sock = entry?.sock || null;
-  
+
   if (!sock) return { ok: false, error: "Session socket is not running" };
   if (!isConnected(sessionKey)) return { ok: false, error: "Session is disconnected" };
 
   const tenantId = Number(entry?.ctx?.tenantId || 0);
   const userId = Number(entry?.ctx?.userId || 0);
-  
+
   if (!tenantId || !userId) {
     return { ok: false, error: "Session context missing (tenant/user data corrupted)" };
   }
-  
+
   const toJid = to.includes("@") ? to : `${to}@s.whatsapp.net`;
   const chatId = await upsertChat(tenantId, sessionKey, toJid, "private");
 
@@ -856,7 +859,7 @@ export async function sendText(sessionKey: string, to: string, text: string) {
     return { ok: true, messageId: res?.key?.id || null };
   } catch (e: any) {
     console.error(`[${sessionKey}] ❌ Failed to send text to ${toJid}:`, e);
-    
+
     await insertMessage(tenantId, userId, {
       sessionKey, direction: "out", remoteJid: toJid, waMessageId: null,
       messageType: "text", textBody: text, rawJson: { text, error: e?.message || String(e) },

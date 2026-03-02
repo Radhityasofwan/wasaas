@@ -217,7 +217,7 @@ export async function listConversations(req: any, res: any) {
 
       return {
         chatId: r.chat_id ?? null,
-        remoteJid: r.remote_jid,
+        peer: r.remote_jid,
         name: r.contact_name ?? null,
         unreadCount: Number(r.unread_count ?? 0),
         lastMessage: {
@@ -323,7 +323,7 @@ export async function listMessages(req: any, res: any) {
     });
 
     const nextCursor = messages.length ? String(messages[0].id) : null;
-    return res.json({ ok: true, remoteJid, messages, nextCursor });
+    return res.json({ ok: true, peer: remoteJid, messages, nextCursor });
   } catch (error: any) {
     console.error("[listMessages] Error fetching messages:", error);
     return res.status(500).json({ ok: false, error: "Gagal menarik daftar pesan" });
@@ -484,7 +484,7 @@ export async function streamSSE(req: any, res: any) {
         send("message", {
           id: r.id,
           sessionKey: r.session_key,
-          remoteJid: r.remote_jid,
+          peer: r.remote_jid,
           direction: r.direction,
           type: r.message_type,
           text: r.text_body ?? null,

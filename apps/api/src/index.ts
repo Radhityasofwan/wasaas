@@ -1,4 +1,5 @@
 console.log("INDEX_MARKER=RUNNING_INDEX_TS");
+process.env.TZ = "Asia/Jakarta";
 
 import "dotenv/config";
 import express from "express";
@@ -74,7 +75,7 @@ function resolveWebDist(): string | null {
   for (const c of candidates) {
     try {
       if (fs.existsSync(path.join(c, "index.html"))) return c;
-    } catch {}
+    } catch { }
   }
   return null;
 }
@@ -527,11 +528,11 @@ async function main() {
 
   // workers: enable only if WORKERS=1
   if (process.env.WORKERS === "1") {
-    setInterval(() => require("./webhook").processWebhookQueue().catch(() => {}), 1500);
-    setInterval(() => require("./broadcast").processBroadcastQueue().catch(() => {}), 600);
+    setInterval(() => require("./webhook").processWebhookQueue().catch(() => { }), 1500);
+    setInterval(() => require("./broadcast").processBroadcastQueue().catch(() => { }), 600);
     setInterval(() => {
       try {
-        require("./followup_worker").processFollowUpQueue().catch(() => {});
+        require("./followup_worker").processFollowUpQueue().catch(() => { });
       } catch {
         /* ignore */
       }

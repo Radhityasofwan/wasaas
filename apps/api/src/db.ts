@@ -19,7 +19,8 @@ export const pool = mysql.createPool({
   password: DB_PASSWORD,
   database: DB_NAME,
   connectionLimit: 10,
-  waitForConnections: true
+  waitForConnections: true,
+  timezone: '+07:00'
 });
 
 // Split SQL safely by semicolon at end of statements (simple but stable for our schema)

@@ -151,11 +151,11 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
   return data as T;
 }
 
-function dedupeByRemoteJid(items: any[]) {
+function dedupeByPeer(items: any[]) {
   const seen = new Set();
   return items.filter(item => {
-    const duplicate = seen.has(item.remoteJid);
-    seen.add(item.remoteJid);
+    const duplicate = seen.has(item.peer);
+    seen.add(item.peer);
     return !duplicate;
   });
 }
@@ -171,7 +171,7 @@ export interface SessionRow {
 
 export interface ConvRow {
   chatId: number;
-  remoteJid: string;
+  peer: string;
   name?: string | null;
   unreadCount: number;
   lastMessage: {
@@ -244,23 +244,17 @@ export const getSenderColor = (jid: string): string => {
 export function normalizeDate(dateStr: string): Date {
   if (!dateStr) return new Date();
   let safeStr = dateStr;
-
   if (safeStr.includes(" ") && !safeStr.includes("T")) {
     safeStr = safeStr.replace(" ", "T");
-    if (!safeStr.endsWith("Z")) {
-      safeStr += "Z";
-    }
   }
-
-  const d = new Date(safeStr);
-  d.setHours(d.getHours() + 7);
-  return d;
+  return new Date(safeStr);
 }
 
 export function formatTime(dateStr: string): string {
   if (!dateStr) return "";
   const d = normalizeDate(dateStr);
   return d.toLocaleTimeString("id-ID", {
+    timeZone: "Asia/Jakarta",
     hour: "2-digit",
     minute: "2-digit"
   });
@@ -270,15 +264,21 @@ export function formatChatDate(dateStr: string, nowTime: Date): string {
   if (!dateStr) return "";
   const d = normalizeDate(dateStr);
 
-  const isToday = nowTime.toLocaleDateString("id-ID") === d.toLocaleDateString("id-ID");
+  const tzObj = { timeZone: "Asia/Jakarta" };
+  const dString = d.toLocaleDateString("id-ID", tzObj);
+  const nowString = nowTime.toLocaleDateString("id-ID", tzObj);
+
+  const isToday = nowString === dString;
+
   const yesterday = new Date(nowTime);
   yesterday.setDate(yesterday.getDate() - 1);
-  const isYesterday = yesterday.toLocaleDateString("id-ID") === d.toLocaleDateString("id-ID");
+  const isYesterday = yesterday.toLocaleDateString("id-ID", tzObj) === dString;
 
   if (isToday) return formatTime(dateStr);
   if (isYesterday) return "Kemarin";
 
   return d.toLocaleDateString("id-ID", {
+    ...tzObj,
     day: "2-digit",
     month: "2-digit",
     year: "2-digit"
@@ -465,20 +465,20 @@ function InboxComponent() {
     });
 
     if (activeFilter === 'unread') result = result.filter(c => c.unreadCount > 0);
-    else if (activeFilter === 'personal') result = result.filter(c => !c.remoteJid.includes('@g.us'));
-    else if (activeFilter === 'group') result = result.filter(c => c.remoteJid.includes('@g.us'));
+    else if (activeFilter === 'personal') result = result.filter(c => !c.peer.includes('@g.us'));
+    else if (activeFilter === 'group') result = result.filter(c => c.peer.includes('@g.us'));
     else if (activeFilter === 'read') result = result.filter(c => c.unreadCount === 0);
     else if (activeFilter.startsWith('label_')) {
       const lblName = activeFilter.replace('label_', '');
-      result = result.filter(c => customLabels[c.remoteJid.split('@')[0]]?.name === lblName);
+      result = result.filter(c => customLabels[c.peer.split('@')[0]]?.name === lblName);
     }
 
     if (searchQuery) {
       const q = searchQuery.toLowerCase();
       const cleanQ = q.replace(/\D/g, '');
       result = result.filter(c => {
-        const numOnly = c.remoteJid.split('@')[0];
-        const matchString = c.remoteJid.toLowerCase().includes(q);
+        const numOnly = c.peer.split('@')[0];
+        const matchString = c.peer.toLowerCase().includes(q);
         const matchName = c.name?.toLowerCase().includes(q) || false;
         const matchNumber = cleanQ && (numOnly.includes(cleanQ));
         const lbl = customLabels[numOnly]?.name.toLowerCase() || "";
@@ -512,7 +512,7 @@ function InboxComponent() {
       togglePeerSelection(jid);
     } else {
       setPeer(jid);
-      setConvs(prev => prev.map(c => c.remoteJid === jid ? { ...c, unreadCount: 0 } : c));
+      setConvs(prev => prev.map(c => c.peer === jid ? { ...c, unreadCount: 0 } : c));
       setHasMoreMsgs(true);
       setAttachOpen(false);
       setMessages([]);
@@ -548,9 +548,9 @@ function InboxComponent() {
   const loadConvs = useCallback(async (sk: string) => {
     try {
       const res = await apiFetch<{ ok: true; conversations: ConvRow[] }>(`/ui/conversations?sessionKey=${encodeURIComponent(sk)}`);
-      const deduped = dedupeByRemoteJid(res.conversations || []);
+      const deduped = dedupeByPeer(res.conversations || []);
       setConvs(deduped.map(c => {
-        if (c.remoteJid === activePeerRef.current) return { ...c, unreadCount: 0 };
+        if (c.peer === activePeerRef.current) return { ...c, unreadCount: 0 };
         return c;
       }));
     } catch (e: any) { setErr(e.message); }
@@ -559,7 +559,7 @@ function InboxComponent() {
   const loadMessages = useCallback(async (sk: string, p: string, cursor?: string) => {
     try {
       const url = `/ui/messages?sessionKey=${encodeURIComponent(sk)}&peer=${encodeURIComponent(p)}&limit=30${cursor ? `&cursor=${cursor}` : ''}`;
-      const res = await apiFetch<{ ok: true; remoteJid: string; messages: MsgRow[], nextCursor?: string }>(url);
+      const res = await apiFetch<{ ok: true; peer: string; messages: MsgRow[], nextCursor?: string }>(url);
       setMessages(prev => {
         const newMsgs = res.messages || [];
         if (cursor) {
@@ -597,7 +597,7 @@ function InboxComponent() {
         const data = JSON.parse(event.data);
         if (data && data.id) {
           // 1. Update Messages if looking at this peer
-          if (data.remoteJid === activePeerRef.current) {
+          if (data.peer === activePeerRef.current) {
             setMessages(prev => {
               // Prevent duplicates
               if (prev.find(m => m.id === data.id)) return prev;
@@ -608,7 +608,7 @@ function InboxComponent() {
               };
               // Persistently mark as read if we are looking at this chat and it's an incoming message
               if (data.direction === 'in') {
-                apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: data.remoteJid }) }).catch(() => { });
+                apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: data.peer }) }).catch(() => { });
               }
               return [...prev, newMsg];
             });
@@ -617,8 +617,8 @@ function InboxComponent() {
 
           // 2. Update Conversations list (move to top & update unread)
           setConvs(prev => {
-            const existingIdx = prev.findIndex(c => c.remoteJid === data.remoteJid);
-            const isUnread = data.direction === 'in' && data.remoteJid !== activePeerRef.current;
+            const existingIdx = prev.findIndex(c => c.peer === data.peer);
+            const isUnread = data.direction === 'in' && data.peer !== activePeerRef.current;
 
             let updatedConv: ConvRow;
             if (existingIdx >= 0) {
@@ -637,7 +637,7 @@ function InboxComponent() {
             } else {
               // New conversation
               updatedConv = {
-                chatId: 0, remoteJid: data.remoteJid, unreadCount: isUnread ? 1 : 0,
+                chatId: 0, peer: data.peer, unreadCount: isUnread ? 1 : 0,
                 lastMessage: {
                   id: data.id, direction: data.direction, type: data.type,
                   text: data.text, mediaUrl: data.mediaUrl, time: data.time, status: data.status
@@ -776,7 +776,7 @@ function InboxComponent() {
     } catch (e: any) { alert("Kesalahan Transmisi Media: " + e.message); } finally { setSending(false); }
   }
 
-  const currentConv = convs.find(c => c.remoteJid === peer);
+  const currentConv = convs.find(c => c.peer === peer);
   const currentLead = leads.find(l => l.to_number === peerNumber);
   const currentLabel = customLabels[peerNumber];
 

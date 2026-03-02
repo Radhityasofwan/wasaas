@@ -20,7 +20,7 @@ router.get("/campaigns", async (req: any, res: any) => {
       query += ` AND c.status = ?`;
       params.push(statusFilter);
     }
-    
+
     query += ` ORDER BY c.id DESC`;
 
     const [rows] = await pool.query(query, params);
@@ -67,7 +67,7 @@ router.put("/campaigns/:id/status", async (req: any, res: any) => {
   try {
     const { status } = req.body;
     if (!["active", "paused", "completed"].includes(status)) return res.status(400).json({ ok: false, error: "Invalid status" });
-    
+
     await pool.query(
       `UPDATE followup_campaigns SET status = ? WHERE id = ? AND tenant_id = ?`,
       [status, req.params.id, req.auth.tenantId]
@@ -106,7 +106,7 @@ router.post("/add-targets", async (req: any, res: any) => {
   const schema = z.object({
     sessionKey: z.string(),
     campaignId: z.coerce.number(),
-    targets: z.array(z.string()).min(1) 
+    targets: z.array(z.string()).min(1)
   });
 
   const parsed = schema.safeParse(req.body);
@@ -119,7 +119,7 @@ router.post("/add-targets", async (req: any, res: any) => {
     // 1. Ambil detail campaign untuk mengecek apakah ini bagian dari Sequence
     const [camps] = await pool.query<any[]>(`SELECT id, name, delay_days, target_time FROM followup_campaigns WHERE id = ? AND tenant_id = ?`, [campaignId, tenantId]);
     if (!camps.length) return res.status(404).json({ ok: false, error: "Campaign tidak ditemukan" });
-    
+
     const baseNameFull = camps[0].name;
     let targetCampaigns = [];
 
@@ -128,13 +128,13 @@ router.post("/add-targets", async (req: any, res: any) => {
       const basePrefix = baseNameFull.split(" - Step ")[0];
       // Ambil SELURUH anak tangga (step 1, 2, 3...)
       const [seqCamps] = await pool.query<any[]>(
-        `SELECT id, delay_days, target_time FROM followup_campaigns WHERE name LIKE ? AND session_key = ? AND tenant_id = ? ORDER BY delay_days ASC`, 
+        `SELECT id, delay_days, target_time FROM followup_campaigns WHERE name LIKE ? AND session_key = ? AND tenant_id = ? ORDER BY delay_days ASC`,
         [`${basePrefix} - Step %`, sessionKey, tenantId]
       );
       targetCampaigns = seqCamps;
     } else {
       // Jika campaign tunggal, pastikan targetCampaigns adalah Array (Bug fix!)
-      targetCampaigns = [camps[0]]; 
+      targetCampaigns = [camps[0]];
     }
 
     let totalAdded = 0;
@@ -145,12 +145,12 @@ router.post("/add-targets", async (req: any, res: any) => {
       const now = new Date();
       const scheduledAt = new Date(now);
       scheduledAt.setDate(scheduledAt.getDate() + camp.delay_days);
-      
+
       if (camp.target_time) {
         const [hh, mm] = camp.target_time.split(":");
         scheduledAt.setHours(Number(hh), Number(mm), 0, 0);
       }
-      
+
       // Pastikan tidak mengeksekusi di masa lalu
       if (scheduledAt.getTime() <= now.getTime()) {
         scheduledAt.setDate(scheduledAt.getDate() + 1);
@@ -177,8 +177,78 @@ router.post("/add-targets", async (req: any, res: any) => {
 // POST: Manual Trigger Worker
 router.post("/trigger-worker", async (req: any, res: any) => {
   try {
-    require("./followup_worker").processFollowUpQueue().catch(() => {});
+    require("./followup_worker").processFollowUpQueue().catch(() => { });
     return res.json({ ok: true, message: "Worker triggered" });
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e.message });
+  }
+});
+
+// POST: Manual Leads Input
+router.post("/leads/manual", async (req: any, res: any) => {
+  const schema = z.object({
+    campaign_id: z.coerce.number(),
+    phone_numbers: z.array(z.string()).min(1)
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+
+  const { campaign_id, phone_numbers } = parsed.data;
+  const tenantId = req.auth.tenantId;
+
+  try {
+    const [camps] = await pool.query<any[]>(
+      `SELECT id, session_key, delay_days, target_time FROM followup_campaigns WHERE id = ? AND tenant_id = ?`,
+      [campaign_id, tenantId]
+    );
+    if (!camps.length) return res.status(404).json({ ok: false, error: "Campaign tidak ditemukan" });
+
+    const camp = camps[0];
+    const sessionKey = camp.session_key;
+
+    // Calculate scheduledAt
+    const now = new Date();
+    const scheduledAt = new Date(now);
+    scheduledAt.setDate(scheduledAt.getDate() + camp.delay_days);
+
+    if (camp.target_time) {
+      const [hh, mm] = camp.target_time.split(":");
+      scheduledAt.setHours(Number(hh), Number(mm), 0, 0);
+    }
+
+    if (scheduledAt.getTime() <= now.getTime()) {
+      scheduledAt.setDate(scheduledAt.getDate() + 1);
+    }
+
+    let added = 0;
+
+    for (const rawNumber of phone_numbers) {
+      let cleaned = rawNumber.replace(/\D/g, '');
+      if (cleaned.startsWith('0')) {
+        cleaned = '62' + cleaned.substring(1);
+      }
+
+      // Basic validation length, minimum WhatsApp number logic
+      if (!cleaned.startsWith('62') || cleaned.length < 8) continue;
+
+      const to_jid = cleaned + '@s.whatsapp.net';
+
+      const [existing] = await pool.query<any[]>(
+        `SELECT id FROM followup_targets WHERE campaign_id = ? AND to_jid = ? AND tenant_id = ?`,
+        [camp.id, to_jid, tenantId]
+      );
+
+      if (existing.length === 0) {
+        await pool.query(
+          `INSERT INTO followup_targets (campaign_id, tenant_id, session_key, to_number, to_jid, scheduled_at, status, created_at) VALUES (?, ?, ?, ?, ?, ?, 'queued', NOW())`,
+          [camp.id, tenantId, sessionKey, cleaned, to_jid, scheduledAt]
+        );
+        added++;
+      }
+    }
+
+    return res.json({ ok: true, added });
   } catch (e: any) {
     return res.status(500).json({ ok: false, error: e.message });
   }

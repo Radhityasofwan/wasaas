@@ -362,8 +362,8 @@ export default function AutoFollowUp() {
                       key={camp.id}
                       onClick={() => setSelectedCampaign(camp)}
                       className={`relative z-10 p-3.5 flex flex-col gap-2 rounded-2xl cursor-pointer transition-colors border ${isSelected
-                          ? "bg-[#c2e7ff] border-transparent ml-2"
-                          : "bg-white border-slate-100 hover:bg-[#f0f4f9] ml-0"
+                        ? "bg-[#c2e7ff] border-transparent ml-2"
+                        : "bg-white border-slate-100 hover:bg-[#f0f4f9] ml-0"
                         }`}
                     >
                       <div className="flex justify-between items-start">
@@ -376,7 +376,7 @@ export default function AutoFollowUp() {
                           <h3 className={`text-[14px] font-bold truncate leading-tight ${isSelected ? 'text-[#001d35]' : 'text-slate-800'}`}>{stepLabel}</h3>
                         </div>
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border shrink-0 ml-2 ${camp.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                            camp.status === 'paused' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-500 border-slate-200'
+                          camp.status === 'paused' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-500 border-slate-200'
                           }`}>
                           {camp.status}
                         </span>
@@ -462,7 +462,7 @@ export default function AutoFollowUp() {
           <div className="flex-1 overflow-y-auto p-4 md:p-6 bg-slate-50/50 scrollbar-hide">
             <div className="flex items-center justify-between mb-3">
               <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider flex items-center gap-2">
-                <Users size={16} className="text-[#0b57d0]" /> Daftar Target Eksekusi
+                <Users size={16} className="text-[#0b57d0]" /> Daftar Target Prospek
               </h4>
               <button
                 onClick={() => setManualLeadsModalOpen(true)}
@@ -496,10 +496,10 @@ export default function AutoFollowUp() {
                           <td className="py-3 px-5 font-mono font-medium text-slate-800 text-sm">{t.to_number}</td>
                           <td className="py-3 px-5">
                             <span className={`px-2.5 py-1 rounded text-[9px] font-bold uppercase tracking-wider border ${t.status === 'replied' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                                t.status === 'queued' ? 'bg-orange-50 text-orange-600 border-orange-100' :
-                                  t.status === 'failed' ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                                    t.status === 'canceled' ? 'bg-slate-50 text-slate-500 border-slate-200' :
-                                      'bg-blue-50 text-blue-600 border-blue-100'
+                              t.status === 'queued' ? 'bg-orange-50 text-orange-600 border-orange-100' :
+                                t.status === 'failed' ? 'bg-rose-50 text-rose-600 border-rose-100' :
+                                  t.status === 'canceled' ? 'bg-slate-50 text-slate-500 border-slate-200' :
+                                    'bg-blue-50 text-blue-600 border-blue-100'
                               }`}>
                               {t.status}
                             </span>
@@ -528,10 +528,10 @@ export default function AutoFollowUp() {
                       <div className="flex justify-between items-start">
                         <span className="font-mono font-bold text-slate-800 text-sm">{t.to_number}</span>
                         <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${t.status === 'replied' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                            t.status === 'queued' ? 'bg-orange-50 text-orange-600 border-orange-100' :
-                              t.status === 'failed' ? 'bg-rose-50 text-rose-600 border-rose-100' :
-                                t.status === 'canceled' ? 'bg-slate-50 text-slate-500 border-slate-200' :
-                                  'bg-blue-50 text-blue-600 border-blue-100'
+                          t.status === 'queued' ? 'bg-orange-50 text-orange-600 border-orange-100' :
+                            t.status === 'failed' ? 'bg-rose-50 text-rose-600 border-rose-100' :
+                              t.status === 'canceled' ? 'bg-slate-50 text-slate-500 border-slate-200' :
+                                'bg-blue-50 text-blue-600 border-blue-100'
                           }`}>
                           {t.status}
                         </span>

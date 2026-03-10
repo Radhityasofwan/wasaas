@@ -154,10 +154,16 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 function dedupeByPeer(items: any[]) {
   const seen = new Set();
   return items.filter(item => {
-    const duplicate = seen.has(item.peer);
-    seen.add(item.peer);
+    const peer = String(item?.peer || item?.remoteJid || item?.remote_jid || "");
+    if (!peer) return false;
+    const duplicate = seen.has(peer);
+    seen.add(peer);
     return !duplicate;
   });
+}
+
+function convPeer(item: any): string {
+  return String(item?.peer || item?.remoteJid || item?.remote_jid || "");
 }
 
 function normalizePhoneDigits(input: string): string {
@@ -831,7 +837,7 @@ function InboxComponent() {
     const active = String(peer || "");
     if (!active) return;
     setConvs(prev => prev.map(c =>
-      String(c?.peer || c?.remoteJid || "") === active
+      convPeer(c) === active
         ? { ...c, unreadCount: 0 }
         : c
     ));
@@ -844,7 +850,7 @@ function InboxComponent() {
       activePeerRef.current = String(jid || "");
       setPeer(String(jid || ""));
       activePeerRef.current = String(jid || "");
-      setConvs(prev => prev.map(c => String(c?.peer || c?.remoteJid || "") === String(jid || "") ? { ...c, unreadCount: 0 } : c));
+      setConvs(prev => prev.map(c => convPeer(c) === String(jid || "") ? { ...c, unreadCount: 0 } : c));
       setHasMoreMsgs(true);
       setAttachOpen(false);
       setMessages([]);
@@ -902,7 +908,7 @@ function InboxComponent() {
       const maxConvId = deduped.reduce((mx, c) => Math.max(mx, Number(c?.lastMessage?.id || 0)), 0);
       sseLastIdRef.current = Math.max(sseLastIdRef.current, maxConvId);
       setConvs(deduped.map(c => {
-        if (String(c?.peer || c?.remoteJid || "") === String(activePeerRef.current || "")) return { ...c, unreadCount: 0 };
+        if (convPeer(c) === String(activePeerRef.current || "")) return { ...c, unreadCount: 0 };
         return c;
       }));
       setConvsReady(true);
@@ -1380,7 +1386,7 @@ function InboxComponent() {
           )}
 
           {filteredConvs.map((c, idx) => {
-            const convJid = String(c?.remoteJid || c?.peer || "");
+            const convJid = convPeer(c);
             const cNum = convJid.split("@")[0];
             const activeJid = String(activePeerRef.current || peer || "");
             const isActive = activeJid === String(convJid || "") && !isSelectionMode;

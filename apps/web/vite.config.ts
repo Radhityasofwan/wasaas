@@ -8,35 +8,45 @@ export default defineConfig(({ mode }) => {
   return {
     plugins: [
       react(),
-      // PWA hanya aktif di production supaya dev tidak kena cache SW
       isProd &&
         VitePWA({
+          strategies: "injectManifest",
+          srcDir: "src",
+          filename: "sw.ts",
           registerType: "autoUpdate",
           manifest: {
-            name: "WA SaaS",
-            short_name: "WA SaaS",
+            id: "/",
+            name: "Wasaas",
+            short_name: "Wasaas",
+            description: "Wasaas - WhatsApp CRM, Inbox, Broadcast, Follow Up",
             start_url: "/",
+            scope: "/",
             display: "standalone",
-            background_color: "#0b141a",
-            theme_color: "#0b141a",
+            orientation: "portrait",
+            background_color: "#f6f8fc",
+            theme_color: "#0b57d0",
             icons: [
               { src: "/pwa-192.png", sizes: "192x192", type: "image/png" },
               { src: "/pwa-512.png", sizes: "512x512", type: "image/png" }
             ]
-          }
+          },
+          injectManifest: {
+            globPatterns: ["**/*.{js,css,html,ico,png,svg,webmanifest}"],
+          },
         })
     ].filter(Boolean) as any,
     server: {
+      port: 5173,
+      strictPort: false,
+      hmr: {
+        protocol: "ws",
+        host: "localhost",
+      },
       proxy: {
-        // backend non-ui
-        // FIX: HAPUS fungsi 'rewrite'. Backend Express Anda MENGHARAPKAN prefix '/api'.
-        // Jika rewrite dibiarkan, Vite akan memotong '/api', dan backend akan merespons 404.
         "^/api(/|\\?|$)": {
           target: "http://localhost:3001",
           changeOrigin: true
         },
-        
-        // UI endpoints
         "^/ui(/|\\?|$)": {
           target: "http://localhost:3001",
           changeOrigin: true

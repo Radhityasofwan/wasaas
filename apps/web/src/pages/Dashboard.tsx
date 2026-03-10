@@ -371,11 +371,11 @@ export default function Dashboard() {
 
         {/* Quick Links Grid */}
         <div className="grid grid-cols-2 gap-4">
-           <Link to="/" className="p-5 bg-white border border-slate-100 rounded-3xl shadow-sm hover:border-[#c2e7ff] hover:bg-[#f0f4f9] transition-all group flex flex-col justify-between">
-              <MessageSquare size={24} className="text-[#0b57d0] group-hover:scale-110 transition-transform" />
+           <Link to="/broadcast" className="p-5 bg-white border border-slate-100 rounded-3xl shadow-sm hover:border-[#c2e7ff] hover:bg-[#f0f4f9] transition-all group flex flex-col justify-between">
+              <Megaphone size={24} className="text-[#0b57d0] group-hover:scale-110 transition-transform" />
               <div className="mt-4">
-                 <span className="text-sm font-bold text-slate-800 block">Buka Inbox</span>
-                 <span className="text-[10px] text-slate-400 font-medium">Balas chat manual</span>
+                 <span className="text-sm font-bold text-slate-800 block">Broadcast</span>
+                 <span className="text-[10px] text-slate-400 font-medium">Kirim pesan massal</span>
               </div>
            </Link>
            <Link to="/templates" className="p-5 bg-white border border-slate-100 rounded-3xl shadow-sm hover:border-[#c2e7ff] hover:bg-[#f0f4f9] transition-all group flex flex-col justify-between">

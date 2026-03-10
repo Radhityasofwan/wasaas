@@ -19,14 +19,20 @@ export async function enablePush() {
   const reg = await navigator.serviceWorker.ready;
 
   const { publicKey } = await apiFetch<{ ok:true; publicKey:string }>("/push/vapid-public-key");
-  const sub = await reg.pushManager.subscribe({
-    userVisibleOnly: true,
-    applicationServerKey: urlBase64ToUint8Array(publicKey),
-  });
+  let sub = await reg.pushManager.getSubscription();
+  if (!sub) {
+    sub = await reg.pushManager.subscribe({
+      userVisibleOnly: true,
+      applicationServerKey: urlBase64ToUint8Array(publicKey),
+    });
+  }
 
   await apiFetch("/push/subscribe", {
     method: "POST",
-    body: JSON.stringify({ subscription: sub.toJSON() }),
+    body: JSON.stringify({
+      subscription: sub.toJSON(),
+      userAgent: navigator.userAgent || ""
+    }),
   });
 
   return true;

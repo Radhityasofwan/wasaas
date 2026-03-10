@@ -23,13 +23,18 @@ import {
   CreditCard,
   Menu,
   AlertTriangle,
-  LayoutDashboard
+  LayoutDashboard,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Download,
+  X
 } from "lucide-react";
 
 import Dashboard from "./pages/Dashboard";
 import Login from "./pages/Login";
 import Sessions from "./pages/Sessions";
 import Inbox from "./pages/Inbox";
+
 import Webhooks from "./pages/Webhooks";
 import Broadcast from "./pages/Broadcast";
 import Leads from "./pages/Leads";
@@ -41,7 +46,9 @@ import Docs from "./pages/Docs";
 import Templates from "./pages/Templates";
 import AutoFollowUp from "./pages/AutoFollowUp";
 
-import { clearApiKey, getApiKey } from "./lib/api";
+import { apiFetch, clearApiKey, getApiKey } from "./lib/api";
+import logo from "./assets/logo-wasaas.png";
+import { enablePush } from "./lib/push";
 
 /** =========================================================================
  * GLOBAL CONFIRM MODAL SYSTEM (MD3 AESTHETIC)
@@ -58,6 +65,45 @@ type ConfirmOptions = {
 type ConfirmContextType = (options: ConfirmOptions | string) => Promise<boolean>;
 
 const ConfirmContext = createContext<ConfirmContextType | null>(null);
+const LAST_MENU_PATH_KEY = "wasaas:last-menu-path";
+const SIDEBAR_COLLAPSED_KEY = "wasaas:sidebar-collapsed";
+const SIDEBAR_SCROLL_KEY = "wasaas:sidebar-scroll-top";
+const JUST_LOGGED_IN_KEY = "wasaas:just-logged-in";
+const INSTALL_CAPSULE_KEY = "wasaas:show-install-capsule";
+
+type DeferredInstallPromptEvent = Event & {
+  prompt: () => Promise<void>;
+  userChoice: Promise<{ outcome: "accepted" | "dismissed"; platform: string }>;
+};
+
+const KNOWN_MENU_PATHS = new Set([
+  "/dashboard",
+  "/inbox",
+  "/sessions",
+  "/broadcast",
+  "/follow-up",
+  "/templates",
+  "/leads",
+  "/auto-reply",
+  "/api-keys",
+  "/webhooks",
+  "/docs",
+  "/admin",
+  "/billing",
+]);
+
+function getSavedMenuPath() {
+  if (typeof window === "undefined") return "/dashboard";
+  const saved = String(localStorage.getItem(LAST_MENU_PATH_KEY) || "").trim();
+  return KNOWN_MENU_PATHS.has(saved) ? saved : "/dashboard";
+}
+
+function isStandaloneDisplay() {
+  if (typeof window === "undefined") return false;
+  const standaloneIOS = Boolean((window.navigator as any).standalone);
+  const standaloneMedia = window.matchMedia?.("(display-mode: standalone)")?.matches;
+  return Boolean(standaloneIOS || standaloneMedia);
+}
 
 export const useConfirm = () => {
   const context = useContext(ConfirmContext);
@@ -94,8 +140,8 @@ function ConfirmProvider({ children }: { children: React.ReactNode }) {
     <ConfirmContext.Provider value={confirm}>
       {children}
       {isOpen && (
-        <div className="fixed inset-0 z-[9999] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-2xl animate-in zoom-in-95 duration-200 flex flex-col">
+        <div className="ui-overlay z-[9999] animate-in fade-in duration-200">
+          <div className="ui-dialog max-w-sm p-6 animate-in zoom-in-95 duration-200">
             <h3 className={`text-xl font-bold mb-2 flex items-center gap-2 ${options.isDanger ? 'text-rose-600' : 'text-slate-800'}`}>
               {options.isDanger && <AlertTriangle size={22} />}
               {options.title || "Konfirmasi"}
@@ -128,20 +174,6 @@ function ConfirmProvider({ children }: { children: React.ReactNode }) {
   );
 }
 
-/** HELPER FETCH LOKAL UNTUK APP.TSX */
-async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const headers = new Headers(init.headers || {});
-  const key = getApiKey();
-  if (key) headers.set("x-api-key", key);
-  if (!headers.get("Content-Type")) headers.set("Content-Type", "application/json");
-  
-  const url = path.startsWith("http") ? path : `/api${path.startsWith("/") ? "" : "/"}${path}`;
-  const res = await fetch(url, { ...init, headers });
-  const data = await res.json();
-  if (!res.ok) throw new Error(data?.error || "API Error");
-  return data as T;
-}
-
 /** Guard Component */
 function RequireKey({ children }: { children: React.ReactNode }) {
   const key = getApiKey();
@@ -161,6 +193,53 @@ function Shell({ children }: { children: React.ReactNode }) {
   const [userName, setUserName] = useState<string>("Loading...");
   const [loadingAuth, setLoadingAuth] = useState(true);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
+  const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(SIDEBAR_COLLAPSED_KEY) === "1";
+  });
+  const [installPromptEvent, setInstallPromptEvent] = useState<DeferredInstallPromptEvent | null>(null);
+  const [showInstallCapsule, setShowInstallCapsule] = useState(false);
+  const [installingPwa, setInstallingPwa] = useState(false);
+  const [enablingPush, setEnablingPush] = useState(false);
+  const [pushEnabled, setPushEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined" || !("Notification" in window)) return false;
+    return Notification.permission === "granted";
+  });
+
+  const handleSidebarScroll = useCallback((e: React.UIEvent<HTMLElement>) => {
+    localStorage.setItem(SIDEBAR_SCROLL_KEY, String(e.currentTarget.scrollTop || 0));
+  }, []);
+
+  const restoreSidebarScroll = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const saved = Number(localStorage.getItem(SIDEBAR_SCROLL_KEY) || 0);
+    if (!Number.isFinite(saved) || saved <= 0) return;
+    requestAnimationFrame(() => {
+      document.querySelectorAll<HTMLElement>("[data-sidebar-scroll='1']").forEach((el) => {
+        el.scrollTop = saved;
+      });
+    });
+  }, []);
+
+  useEffect(() => {
+    const onBeforeInstallPrompt = (evt: Event) => {
+      evt.preventDefault();
+      setInstallPromptEvent(evt as DeferredInstallPromptEvent);
+    };
+
+    const onAppInstalled = () => {
+      setShowInstallCapsule(false);
+      setInstallPromptEvent(null);
+      localStorage.removeItem(INSTALL_CAPSULE_KEY);
+    };
+
+    window.addEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+    window.addEventListener("appinstalled", onAppInstalled);
+    return () => {
+      window.removeEventListener("beforeinstallprompt", onBeforeInstallPrompt);
+      window.removeEventListener("appinstalled", onAppInstalled);
+    };
+  }, []);
 
   useEffect(() => {
     apiFetch<any>("me")
@@ -179,9 +258,42 @@ function Shell({ children }: { children: React.ReactNode }) {
     setIsMobileMenuOpen(false);
   }, [loc.pathname]);
 
+  useEffect(() => {
+    if (loadingAuth) return;
+
+    const justLoggedIn = localStorage.getItem(JUST_LOGGED_IN_KEY) === "1";
+    if (justLoggedIn) {
+      localStorage.removeItem(JUST_LOGGED_IN_KEY);
+      if (!enablingPush && "Notification" in window && Notification.permission !== "denied") {
+        setEnablingPush(true);
+        enablePush()
+          .then(() => setPushEnabled(true))
+          .catch(() => { })
+          .finally(() => setEnablingPush(false));
+      }
+    }
+
+    const shouldShowInstall = localStorage.getItem(INSTALL_CAPSULE_KEY) === "1";
+    if (shouldShowInstall && !isStandaloneDisplay() && installPromptEvent) {
+      setShowInstallCapsule(true);
+    }
+  }, [loadingAuth, installPromptEvent, enablingPush]);
+
+  useEffect(() => {
+    if (KNOWN_MENU_PATHS.has(loc.pathname)) {
+      localStorage.setItem(LAST_MENU_PATH_KEY, loc.pathname);
+    }
+  }, [loc.pathname]);
+
+  useEffect(() => {
+    localStorage.setItem(SIDEBAR_COLLAPSED_KEY, isSidebarCollapsed ? "1" : "0");
+    restoreSidebarScroll();
+  }, [isSidebarCollapsed, restoreSidebarScroll]);
+
   const menu = useMemo(() => [
     { group: 'Utama', name: "Dashboard", path: "/dashboard", icon: <LayoutDashboard size={20} strokeWidth={2} />, allowedRoles: ['admin', 'owner', 'member'] },
-    { group: 'Utama', name: "Inbox", path: "/", icon: <MessageCircle size={20} strokeWidth={2} />, allowedRoles: ['admin', 'owner', 'member'] },
+    { group: 'Utama', name: "Inbox", path: "/inbox", icon: <MessageCircle size={20} strokeWidth={2} />, allowedRoles: ['admin', 'owner', 'member'] },
+
     { group: 'Utama', name: "Sessions", path: "/sessions", icon: <Smartphone size={20} strokeWidth={2} />, allowedRoles: ['admin', 'owner', 'member'] },
     
     { group: 'Pemasaran & CRM', name: "Broadcast", path: "/broadcast", icon: <Megaphone size={20} strokeWidth={2} />, allowedRoles: ['admin', 'owner', 'member'] },
@@ -207,6 +319,10 @@ function Shell({ children }: { children: React.ReactNode }) {
     }, {} as Record<string, typeof visibleMenu>);
   }, [menu, role]);
 
+  useEffect(() => {
+    if (!loadingAuth) restoreSidebarScroll();
+  }, [loadingAuth, restoreSidebarScroll, loc.pathname]);
+
   const handleLogout = async () => {
     const isConfirmed = await confirm({
       title: "Keluar Akun",
@@ -221,101 +337,192 @@ function Shell({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const dismissInstallCapsule = () => {
+    setShowInstallCapsule(false);
+    localStorage.removeItem(INSTALL_CAPSULE_KEY);
+  };
+
+  const handleInstallPwa = async () => {
+    if (!installPromptEvent) return;
+    try {
+      setInstallingPwa(true);
+      await installPromptEvent.prompt();
+      const choice = await installPromptEvent.userChoice;
+      if (choice?.outcome === "accepted") {
+        setShowInstallCapsule(false);
+        localStorage.removeItem(INSTALL_CAPSULE_KEY);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setInstallingPwa(false);
+      setInstallPromptEvent(null);
+    }
+  };
+
   if (loadingAuth) {
     return <div className="min-h-screen flex items-center justify-center bg-[#f8fafd] text-slate-500 font-medium">Memverifikasi Sesi...</div>;
   }
 
-  const SidebarContent = () => (
-    <div className="flex flex-col h-full bg-[#f8fafd] safe-area-pb">
-      <div className="px-6 py-5 flex items-center gap-4 shrink-0">
-        <img 
-          src="https://matiklaundry.site/wp-content/uploads/2026/02/logo_wa-saas.png" 
-          alt="WA SaaS Logo" 
-          className="w-10 h-10 object-contain"
-          fetchPriority="high" 
-        />
-        <div>
-          <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">WA SaaS</h1>
-          <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest mt-1 block">
-            {role === 'admin' ? 'Superadmin' : 'Workspace'}
-          </span>
+  const SidebarContent = ({ mobile = false }: { mobile?: boolean }) => {
+    const collapsed = mobile ? false : isSidebarCollapsed;
+
+    return (
+      <div className="flex flex-col h-full bg-[#f8fafd] safe-area-pb">
+        <div className={`py-5 flex items-center shrink-0 border-b border-slate-100 ${collapsed ? "px-3 justify-center" : "px-5 justify-between gap-3"}`}>
+          <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3"} min-w-0`}>
+            <img
+              src={logo}
+              alt="Wasaas Logo"
+              className={`${collapsed ? "w-12 h-12" : "w-14 h-14"} object-contain shrink-0`}
+              fetchPriority="high"
+            />
+            {!collapsed && (
+              <div className="min-w-0">
+                <h1 className="text-xl font-bold text-slate-800 tracking-tight leading-none">Wasaas</h1>
+                <span className="text-[11px] font-semibold text-slate-500 uppercase tracking-widest mt-1 block truncate">
+                  {role === "admin" ? "Superadmin" : "Workspace"}
+                </span>
+              </div>
+            )}
+          </div>
+          {!mobile && !collapsed && (
+            <button
+              type="button"
+              onClick={() => setIsSidebarCollapsed(true)}
+              className="ui-btn-ghost !p-2 shrink-0"
+              aria-label="Collapse sidebar"
+              title="Collapse sidebar"
+            >
+              <PanelLeftClose size={18} />
+            </button>
+          )}
+          {!mobile && collapsed && (
+            <button
+              type="button"
+              onClick={() => setIsSidebarCollapsed(false)}
+              className="ui-btn-ghost !p-2 mt-2"
+              aria-label="Expand sidebar"
+              title="Expand sidebar"
+            >
+              <PanelLeftOpen size={18} />
+            </button>
+          )}
+        </div>
+
+        <nav
+          data-sidebar-scroll="1"
+          onScroll={handleSidebarScroll}
+          className={`flex-1 overflow-y-auto py-3 space-y-5 scrollbar-hide ${collapsed ? "px-2" : "px-3"}`}
+        >
+          {Object.entries(groupedMenu).map(([groupName, items]) => (
+            <div key={groupName}>
+              {!collapsed && (
+                <div className="px-3 mb-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                  {groupName}
+                </div>
+              )}
+              <div className="space-y-1">
+                {items.map((item) => {
+                  const isActive = loc.pathname === item.path || (loc.pathname === "/" && item.path === "/");
+                  return (
+                    <Link
+                      key={item.path}
+                      to={item.path}
+                      title={collapsed ? item.name : undefined}
+                      className={`flex items-center ${collapsed ? "justify-center px-2" : "gap-3 px-3"} py-2.5 rounded-2xl text-[14px] font-medium transition-colors ${
+                        isActive
+                          ? "bg-[#c2e7ff] text-[#001d35]"
+                          : "text-slate-700 hover:bg-slate-200/60 hover:text-slate-900"
+                      }`}
+                    >
+                      <span className={isActive ? "text-[#001d35]" : "text-slate-500"}>{item.icon}</span>
+                      {!collapsed && <span className="truncate">{item.name}</span>}
+                    </Link>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </nav>
+
+        <div className="p-3 shrink-0">
+          <div className={`ui-card p-3 flex ${collapsed ? "items-center justify-center" : "flex-col gap-3"}`}>
+            {!collapsed && (
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm uppercase">
+                  {userName.charAt(0)}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-slate-800 truncate">{userName}</p>
+                  <p className="text-xs text-slate-500 truncate capitalize">{role}</p>
+                </div>
+              </div>
+            )}
+            <button
+              type="button"
+              onClick={handleLogout}
+              className={`ui-btn-ghost ${collapsed ? "!p-2.5" : "w-full"}`}
+              title={collapsed ? "Keluar" : undefined}
+            >
+              <LogOut size={16} strokeWidth={2} />
+              {!collapsed && "Keluar"}
+            </button>
+          </div>
         </div>
       </div>
+    );
+  };
 
-      <nav className="flex-1 overflow-y-auto px-4 py-2 space-y-6 scrollbar-hide">
-        {Object.entries(groupedMenu).map(([groupName, items]) => (
-          <div key={groupName}>
-            <div className="px-4 mb-2 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
-              {groupName}
-            </div>
-            <div className="space-y-0.5">
-              {items.map((item) => {
-                const isActive = loc.pathname === item.path || (loc.pathname === '/' && item.path === '/');
-                return (
-                  <Link
-                    key={item.path}
-                    to={item.path}
-                    className={`flex items-center gap-3.5 px-4 py-3 rounded-full text-[14px] font-medium transition-colors ${
-                      loc.pathname === item.path
-                        ? "bg-[#c2e7ff] text-[#001d35]" 
-                        : "text-slate-700 hover:bg-slate-200/50 hover:text-slate-900"
-                    }`}
-                  >
-                    <span className={loc.pathname === item.path ? "text-[#001d35]" : "text-slate-500"}>
-                      {item.icon}
-                    </span>
-                    {item.name}
-                  </Link>
-                );
-              })}
-            </div>
+  return (
+    <div className="flex h-[100dvh] w-full bg-white overflow-hidden text-slate-800">
+      {showInstallCapsule && (
+        <div className="fixed z-[120] bottom-4 left-1/2 -translate-x-1/2 md:left-auto md:right-6 md:translate-x-0 bg-[#001d35] text-white rounded-full px-3 py-2 shadow-2xl border border-white/10 flex items-center gap-2 max-w-[95vw]">
+          <div className="w-8 h-8 rounded-full bg-white/10 flex items-center justify-center shrink-0">
+            <Download size={16} />
           </div>
-        ))}
-      </nav>
-
-      <div className="p-4 shrink-0">
-        <div className="bg-white rounded-2xl p-4 flex flex-col gap-3 shadow-sm border border-slate-100">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-sm uppercase">
-              {userName.charAt(0)}
-            </div>
-            <div className="flex-1 min-w-0">
-              <p className="text-sm font-bold text-slate-800 truncate">{userName}</p>
-              <p className="text-xs text-slate-500 truncate capitalize">{role}</p>
+          <div className="min-w-0">
+            <div className="text-xs font-semibold leading-tight truncate">Install Wasaas App</div>
+            <div className="text-[11px] text-[#c2e7ff] leading-tight truncate">
+              {pushEnabled ? "Notifikasi aktif" : "Aktifkan agar akses lebih stabil"}
             </div>
           </div>
           <button
-            onClick={handleLogout}
-            className="w-full py-2.5 flex items-center justify-center gap-2 rounded-xl text-sm font-semibold text-slate-600 bg-[#f8fafd] hover:bg-rose-50 hover:text-rose-600 transition-colors"
+            type="button"
+            onClick={handleInstallPwa}
+            disabled={installingPwa}
+            className="ui-btn !py-1.5 !px-3 !text-xs !font-bold bg-[#0b57d0] text-white hover:bg-[#0a46a9] disabled:opacity-50"
           >
-            <LogOut size={16} strokeWidth={2} />
-            Keluar
+            {installingPwa ? "..." : "Install"}
+          </button>
+          <button
+            type="button"
+            onClick={dismissInstallCapsule}
+            className="ui-btn-ghost !p-2 !text-white !border-white/20 hover:!bg-white/10"
+            aria-label="Tutup notifikasi install"
+          >
+            <X size={14} />
           </button>
         </div>
-      </div>
-    </div>
-  );
-
-  return (
-    <div className="flex h-screen w-full bg-white overflow-hidden text-slate-800 font-sans">
+      )}
       
-      <aside className="hidden md:block w-72 shrink-0 h-full border-r border-slate-100">
+      <aside className={`hidden md:block shrink-0 h-full border-r border-slate-100 transition-[width] duration-200 ease-out ${isSidebarCollapsed ? "w-[88px]" : "w-72"}`}>
         <SidebarContent />
       </aside>
 
       {isMobileMenuOpen && (
         <div 
-          className="fixed inset-0 bg-slate-900/40 z-40 md:hidden backdrop-blur-sm transition-opacity"
+          className="fixed inset-0 bg-slate-900/45 z-40 md:hidden transition-opacity"
           onClick={() => setIsMobileMenuOpen(false)}
         />
       )}
 
       <aside 
-        className={`fixed inset-y-0 left-0 z-50 w-72 bg-[#f8fafd] transform transition-transform duration-300 ease-in-out md:hidden shadow-2xl ${
+        className={`fixed inset-y-0 left-0 z-50 w-[18.5rem] max-w-[88vw] bg-[#f8fafd] transform transition-transform duration-300 ease-out md:hidden shadow-2xl ${
           isMobileMenuOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        <SidebarContent />
+        <SidebarContent mobile />
       </aside>
 
       <div className="flex-1 flex flex-col h-full min-w-0 bg-white">
@@ -330,11 +537,11 @@ function Shell({ children }: { children: React.ReactNode }) {
             </button>
             <div className="font-bold text-slate-800 text-lg flex items-center gap-2.5">
               <img 
-                src="https://matiklaundry.site/wp-content/uploads/2026/02/logo_wa-saas.png" 
+                src={logo} 
                 alt="Logo" 
-                className="w-8 h-8 object-contain"
+                className="w-9 h-9 object-contain"
               />
-              WA SaaS
+              Wasaas
             </div>
           </div>
           <div className="w-8 h-8 rounded-full bg-blue-100 flex items-center justify-center text-blue-700 font-bold text-xs uppercase">
@@ -342,12 +549,12 @@ function Shell({ children }: { children: React.ReactNode }) {
           </div>
         </header>
 
-        <main className="flex-1 overflow-auto relative p-4 md:p-6 lg:p-8 scrollbar-hide">
+        <main className="flex-1 overflow-y-auto overflow-x-hidden relative p-4 md:p-6 lg:p-8 scrollbar-hide">
           <div className="max-w-[1400px] mx-auto h-full">
             {role !== 'admin' && (loc.pathname === '/admin' || loc.pathname === '/billing') ? (
               <div className="h-full flex flex-col items-center justify-center text-center">
                 <div className="w-16 h-16 bg-slate-50 rounded-full flex items-center justify-center mb-4 border border-slate-100">
-                  <span className="text-2xl">🔒</span>
+                  <AlertTriangle size={24} className="text-amber-500" />
                 </div>
                 <h2 className="text-xl font-bold text-slate-800">Akses Ditolak</h2>
                 <p className="text-slate-500 mt-2 text-sm">Anda tidak memiliki izin untuk melihat halaman ini.</p>
@@ -374,7 +581,8 @@ export default function App() {
               <Routes>
                 {/* Menu Klien */}
                 <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/" element={<Inbox />} />
+                <Route path="/" element={<Navigate to={getSavedMenuPath()} replace />} />
+                <Route path="/inbox" element={<Inbox />} />
                 <Route path="/sessions" element={<Sessions />} />
                 <Route path="/broadcast" element={<Broadcast />} />
                 <Route path="/follow-up" element={<AutoFollowUp />} />

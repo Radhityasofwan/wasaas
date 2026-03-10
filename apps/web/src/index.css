@@ -4,8 +4,19 @@
 
 @layer base {
   :root {
-    /* Font standar perangkat bawaan (San Francisco untuk iOS, Roboto untuk Android) */
-    font-family: system-ui, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+    font-family: system-ui, -apple-system, Helvetica, Arial, Roboto, sans-serif;
+    --ui-bg: #f6f8fc;
+    --ui-surface: #ffffff;
+    --ui-border: #dce4ee;
+    --ui-text: #1f2937;
+    --ui-muted: #64748b;
+    --ui-primary: #0b57d0;
+    --ui-primary-strong: #0a46a9;
+    --ui-radius-sm: 10px;
+    --ui-radius-md: 14px;
+    --ui-radius-lg: 20px;
+    --ui-shadow-sm: 0 1px 2px rgba(15, 23, 42, 0.06);
+    --ui-shadow-md: 0 12px 28px rgba(15, 23, 42, 0.1);
   }
 
   html, body, #root {
@@ -13,16 +24,35 @@
     width: 100%;
     margin: 0;
     padding: 0;
-    overscroll-behavior-y: none; /* Mencegah mantul/bounce-scroll berlebih di iOS */
-    -webkit-tap-highlight-color: transparent; /* Hilangkan kedip biru saat tombol ditekan di HP */
-    @apply antialiased bg-slate-50 text-slate-800;
+    overscroll-behavior-y: none;
+    -webkit-tap-highlight-color: transparent;
+    font-family: system-ui, -apple-system, Helvetica, Arial, Roboto, sans-serif;
+    @apply antialiased;
+    background: var(--ui-bg);
+    color: var(--ui-text);
   }
 
-  /* Safe Area untuk Notch / Dynamic Island di iOS */
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+
+  img, svg, video, canvas {
+    max-width: 100%;
+    height: auto;
+  }
+
+  button, input, select, textarea {
+    font: inherit;
+    color: inherit;
+  }
+
+  a {
+    color: inherit;
+  }
+
   .safe-area-pt { padding-top: env(safe-area-inset-top); }
   .safe-area-pb { padding-bottom: env(safe-area-inset-bottom); }
 
-  /* Custom Scrollbar Minimalis */
   ::-webkit-scrollbar {
     width: 6px;
     height: 6px;
@@ -36,8 +66,9 @@
   ::-webkit-scrollbar-thumb:hover {
     @apply bg-slate-400;
   }
+}
 
-  /* Helper untuk menyembunyikan scrollbar tapi tetap bisa di-scroll */
+@layer components {
   .scrollbar-hide::-webkit-scrollbar {
     display: none;
   }
@@ -45,16 +76,78 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+
+  .ui-card {
+    @apply bg-white border border-slate-200 shadow-sm;
+    border-radius: var(--ui-radius-md);
+  }
+
+  .ui-panel {
+    @apply bg-white border border-slate-100 shadow-sm;
+    border-radius: var(--ui-radius-lg);
+  }
+
+  .ui-input {
+    @apply w-full bg-slate-50 border border-slate-200 px-3 py-2.5 text-sm outline-none focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors;
+    border-radius: var(--ui-radius-sm);
+  }
+
+  .ui-select {
+    @apply w-full bg-white border border-slate-200 px-3 py-2.5 text-sm outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-colors;
+    border-radius: var(--ui-radius-sm);
+  }
+
+  .ui-btn {
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2.5 text-sm font-semibold border border-transparent transition-colors disabled:opacity-50 disabled:cursor-not-allowed;
+    border-radius: 9999px;
+  }
+
+  .ui-btn-primary {
+    @apply ui-btn text-white;
+    background: var(--ui-primary);
+  }
+
+  .ui-btn-primary:hover {
+    background: var(--ui-primary-strong);
+  }
+
+  .ui-btn-ghost {
+    @apply ui-btn bg-white border-slate-200 text-slate-700 hover:bg-slate-100;
+  }
+
+  .ui-overlay {
+    @apply fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/45 backdrop-blur-[2px];
+  }
+
+  .ui-dialog {
+    @apply w-full bg-white border border-slate-200 flex flex-col overflow-hidden;
+    border-radius: var(--ui-radius-lg);
+    box-shadow: var(--ui-shadow-md);
+  }
+
+  /* Harmonize modal lama tanpa edit semua file satu per satu */
+  .fixed.inset-0.backdrop-blur-sm {
+    @apply bg-slate-900/45;
+  }
+
+  .fixed.inset-0.backdrop-blur-sm > .bg-white.rounded-3xl {
+    @apply border border-slate-200 shadow-2xl;
+  }
+
+  .glass-card {
+    @apply ui-card;
+  }
+
+  .glass-input {
+    @apply ui-input;
+  }
 }
 
-/* OVERRIDE: 
-  Kita ubah class 'glass' bawaan menjadi desain Native / Clean UI.
-  Ini akan otomatis memperbaiki tampilan halaman lain tanpa harus edit file-nya!
-*/
-.glass-card {
-  @apply bg-white border border-slate-200 rounded-xl shadow-sm;
-}
-
-.glass-input {
-  @apply bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-sm focus:bg-white focus:border-blue-500 focus:ring-2 focus:ring-blue-500/20 transition-all duration-200 outline-none;
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

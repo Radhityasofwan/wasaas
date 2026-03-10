@@ -1,37 +1,91 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { Key, MessageSquare, Smartphone, Zap, ArrowRight, ShieldAlert, AlertTriangle } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  Key,
+  Megaphone,
+  MessageSquare,
+  Settings,
+  ShieldAlert,
+  Smartphone,
+  Zap,
+} from "lucide-react";
 
-type Tab = "auth" | "messages" | "sessions" | "webhooks";
+type Tab = "auth" | "messages" | "sessions" | "broadcast" | "webhooks" | "admin";
+
+function CodeBlock({ title, code }: { title: string; code: string }) {
+  return (
+    <div className="bg-[#1f1f1f] rounded-2xl overflow-hidden border border-[#333] shadow-md w-full">
+      <div className="bg-[#2d2d2d] px-4 py-2 border-b border-[#444]">
+        <span className="text-[10px] font-mono text-slate-300">{title}</span>
+      </div>
+      <div className="overflow-x-auto w-full">
+        <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-slate-200 leading-loose">{code}</pre>
+      </div>
+    </div>
+  );
+}
+
+function EndpointCard({
+  method,
+  path,
+  desc,
+}: {
+  method: "GET" | "POST" | "PUT" | "DELETE";
+  path: string;
+  desc: string;
+}) {
+  const badgeClass =
+    method === "GET"
+      ? "bg-[#e9eef6] text-[#0b57d0] border-[#c2e7ff]"
+      : method === "POST"
+        ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+        : method === "PUT"
+          ? "bg-amber-50 text-amber-700 border-amber-200"
+          : "bg-rose-50 text-rose-700 border-rose-200";
+
+  return (
+    <div className="p-4 rounded-2xl border border-slate-100 bg-white">
+      <div className="flex items-center gap-2 flex-wrap">
+        <span className={`px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider rounded border ${badgeClass}`}>
+          {method}
+        </span>
+        <code className="text-xs md:text-sm font-semibold text-slate-700 bg-[#f0f4f9] px-2 py-0.5 rounded break-all">
+          {path}
+        </code>
+      </div>
+      <p className="text-xs md:text-sm text-slate-600 mt-2 leading-relaxed">{desc}</p>
+    </div>
+  );
+}
 
 export default function Docs() {
   const [activeTab, setActiveTab] = useState<Tab>("auth");
 
   const tabs: { id: Tab; label: string; icon: React.ReactNode }[] = [
-    { id: "auth", label: "Otentikasi & Limit", icon: <Key size={18} /> },
-    { id: "messages", label: "Kirim Pesan", icon: <MessageSquare size={18} /> },
-    { id: "sessions", label: "Sesi & Device", icon: <Smartphone size={18} /> },
+    { id: "auth", label: "Auth & Limits", icon: <Key size={18} /> },
+    { id: "messages", label: "Messages", icon: <MessageSquare size={18} /> },
+    { id: "sessions", label: "Sessions", icon: <Smartphone size={18} /> },
+    { id: "broadcast", label: "Broadcast", icon: <Megaphone size={18} /> },
     { id: "webhooks", label: "Webhooks", icon: <Zap size={18} /> },
+    { id: "admin", label: "Admin Billing", icon: <Settings size={18} /> },
   ];
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 animate-in fade-in duration-500 pb-20 w-full">
-      
-      {/* HEADER */}
       <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 md:gap-6">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-slate-800 tracking-tight flex items-center gap-2.5">
-            <TerminalIcon className="text-[#0b57d0]" size={28} />
+            <Zap className="text-[#0b57d0]" size={28} />
             Developer API
           </h1>
-          <p className="text-sm text-slate-500 mt-1 md:mt-2">
-            Dokumentasi Integrasi HTTP REST.
-          </p>
+          <p className="text-sm text-slate-500 mt-1 md:mt-2">Base URL API: <code>/api</code></p>
         </div>
-        
-        <Link 
+
+        <Link
           to="/api-keys"
-          className="flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-[#0b57d0] text-white font-bold text-sm hover:bg-[#001d35] active:scale-95 transition-all shadow-sm w-full md:w-auto shrink-0"
+          className="flex items-center justify-center gap-2 px-6 py-3 rounded-full bg-[#0b57d0] text-white font-bold text-sm hover:bg-[#001d35] transition-all shadow-sm w-full md:w-auto shrink-0"
         >
           <span>Buat API Key</span>
           <ArrowRight size={16} />
@@ -39,8 +93,6 @@ export default function Docs() {
       </div>
 
       <div className="flex flex-col lg:flex-row gap-6 lg:gap-8 w-full">
-        
-        {/* SIDEBAR TABS (Kiri / Atas) */}
         <div className="w-full lg:w-[240px] shrink-0 flex lg:flex-col gap-2 overflow-x-auto scrollbar-hide bg-white p-2 rounded-2xl lg:rounded-3xl border border-slate-100 shadow-sm">
           {tabs.map((tab) => (
             <button
@@ -52,68 +104,54 @@ export default function Docs() {
                   : "bg-transparent text-slate-500 hover:bg-[#f0f4f9] hover:text-slate-800"
               }`}
             >
-              <span className={activeTab === tab.id ? "text-[#001d35]" : "text-slate-400"}>
-                {tab.icon}
-              </span>
+              <span className={activeTab === tab.id ? "text-[#001d35]" : "text-slate-400"}>{tab.icon}</span>
               {tab.label}
             </button>
           ))}
         </div>
 
-        {/* CONTENT AREA (Kanan / Bawah) - DITAMBAHKAN min-w-0 AGAR TIDAK MELEBAR */}
         <div className="flex-1 min-w-0 bg-white border border-slate-100 rounded-3xl p-5 md:p-8 lg:p-10 shadow-sm min-h-[500px]">
-          
-          {/* TAB 1: AUTHENTICATION */}
           {activeTab === "auth" && (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
-              <section className="space-y-4">
-                <h2 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Otentikasi API</h2>
-                <p className="text-sm text-slate-600 leading-relaxed max-w-3xl">
-                  Seluruh endpoint API dilindungi dan membutuhkan otentikasi. Anda harus menyertakan API Key aktif Anda pada setiap HTTP Request melalui header <code className="bg-[#f0f4f9] text-[#0b57d0] px-2 py-0.5 rounded font-mono text-xs">x-api-key</code>.
+              <section className="space-y-3">
+                <h2 className="text-xl md:text-2xl font-bold text-slate-800">Authentication</h2>
+                <p className="text-sm text-slate-600">
+                  Semua endpoint membutuhkan header <code>x-api-key</code>. Contoh:
                 </p>
-
-                {/* DITAMBAHKAN w-full dan overflow-hidden */}
-                <div className="bg-[#1f1f1f] rounded-2xl overflow-hidden border border-[#333] shadow-md mt-4 w-full">
-                  <div className="bg-[#2d2d2d] px-4 py-2 border-b border-[#444] flex items-center gap-2">
-                    <div className="w-2.5 h-2.5 rounded-full bg-rose-500"></div>
-                    <div className="w-2.5 h-2.5 rounded-full bg-amber-500"></div>
-                    <div className="w-2.5 h-2.5 rounded-full bg-emerald-500"></div>
-                    <span className="ml-2 text-[10px] font-mono text-slate-300">Contoh Request (cURL)</span>
-                  </div>
-                  <div className="overflow-x-auto w-full">
-                    <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-slate-300 leading-loose">
-<span className="text-[#c792ea]">curl</span> --request GET \
-  --url https://api.domainanda.com/v1/sessions \
-  --header <span className="text-[#c3e88d]">'x-api-key: ak_live_xxxxxxxxx'</span> \
-  --header <span className="text-[#c3e88d]">'Content-Type: application/json'</span>
-                    </pre>
-                  </div>
-                </div>
+                <CodeBlock
+                  title="cURL"
+                  code={`curl --request GET \\
+  --url http://localhost:3001/api/health \\
+  --header 'x-api-key: live_xxxxxxxxx'`}
+                />
               </section>
 
-              <hr className="border-slate-100" />
-
-              <section className="space-y-5">
-                <h2 className="text-xl font-bold text-slate-800 tracking-tight">Rate Limits & Error Codes</h2>
-                <p className="text-sm text-slate-600 leading-relaxed max-w-3xl">
-                  Berdasarkan paket (plan) Anda, sistem menerapkan pembatasan pada level tenant (`enforce.ts` & `auth.ts`). Berikut adalah kode error yang mungkin dikembalikan:
+              <section className="space-y-3">
+                <h2 className="text-xl font-bold text-slate-800">Limit Rules</h2>
+                <p className="text-sm text-slate-600">
+                  Limit diambil dari snapshot subscription tenant: <code>limit_sessions</code>,{" "}
+                  <code>limit_messages_daily</code>, <code>limit_broadcast_daily</code>.
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="p-5 rounded-2xl bg-rose-50 border border-rose-100 flex items-start gap-3">
-                    <ShieldAlert size={20} className="text-rose-500 shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <span className="text-rose-700 font-bold text-sm block mb-1">HTTP 401 / 403</span>
-                      <p className="text-xs text-rose-600/90 font-medium leading-relaxed">API Key tidak valid, tidak ditemukan, atau telah dicabut (revoked).</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="p-4 rounded-2xl bg-rose-50 border border-rose-100 flex items-start gap-3">
+                    <ShieldAlert size={18} className="text-rose-500 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-sm font-bold text-rose-700">401/403</div>
+                      <p className="text-xs text-rose-600">API key tidak valid / revoked / tidak berizin.</p>
                     </div>
                   </div>
-                  <div className="p-5 rounded-2xl bg-amber-50 border border-amber-100 flex items-start gap-3">
-                    <AlertTriangle size={20} className="text-amber-500 shrink-0 mt-0.5" />
-                    <div className="min-w-0">
-                      <span className="text-amber-700 font-bold text-sm block mb-1">HTTP 429</span>
-                      <p className="text-xs text-amber-600/90 font-medium leading-relaxed break-words">
-                        <code className="bg-white/60 px-1 rounded border border-amber-200 inline-block mb-1 w-max max-w-full truncate">message_limit_reached</code><br/>
-                        Kuota pesan harian Anda telah habis.
-                      </p>
+                  <div className="p-4 rounded-2xl bg-amber-50 border border-amber-100 flex items-start gap-3">
+                    <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-sm font-bold text-amber-700">429</div>
+                      <p className="text-xs text-amber-600">Limit harian atau limit session tercapai.</p>
+                    </div>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-start gap-3">
+                    <Key size={18} className="text-emerald-600 shrink-0 mt-0.5" />
+                    <div>
+                      <div className="text-sm font-bold text-emerald-700">Superadmin</div>
+                      <p className="text-xs text-emerald-600">Role <code>admin</code> tidak dibatasi kuota.</p>
                     </div>
                   </div>
                 </div>
@@ -121,225 +159,203 @@ export default function Docs() {
             </div>
           )}
 
-          {/* TAB 2: MESSAGES */}
           {activeTab === "messages" && (
-            <div className="space-y-10 animate-in slide-in-from-right-4 duration-300">
-              {/* Send Text */}
-              <section className="space-y-4">
-                <div className="space-y-2">
-                  <h2 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Kirim Pesan Teks</h2>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase tracking-wider rounded-md border border-emerald-200">POST</span>
-                    <code className="text-sm font-bold text-slate-600 bg-[#f0f4f9] px-2 py-0.5 rounded break-all">/v1/messages/send-text</code>
-                  </div>
-                </div>
-
-                <div className="bg-[#1f1f1f] rounded-2xl overflow-hidden border border-[#333] shadow-md w-full">
-                  <div className="bg-[#2d2d2d] px-4 py-2 border-b border-[#444] flex items-center gap-2">
-                    <span className="text-[10px] font-mono text-slate-300">JSON Request Body</span>
-                  </div>
-                  <div className="overflow-x-auto w-full">
-                    <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-[#82aaff] leading-loose">
-{`{
-  "sessionKey": "device-01",
-  "to": "628123456789",
-  "text": "Halo! Ini pesan notifikasi dari sistem."
-}`}
-                    </pre>
-                  </div>
-                  <div className="bg-[#1a1a1a] p-4 border-t border-[#333]">
-                    <div className="text-[10px] text-slate-400 font-bold uppercase tracking-wider mb-2">Response (Sukses)</div>
-                    <code className="text-xs font-mono text-[#c3e88d] break-all">{`{ "ok": true, "messageId": "BAE5..." }`}</code>
-                  </div>
-                </div>
-              </section>
-
-              <hr className="border-slate-100" />
-
-              {/* Send Media */}
-              <section className="space-y-4">
-                <div className="space-y-2">
-                  <h2 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Kirim Media (Gambar/Dokumen)</h2>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase tracking-wider rounded-md border border-emerald-200">POST</span>
-                    <code className="text-sm font-bold text-slate-600 bg-[#f0f4f9] px-2 py-0.5 rounded break-all">/v1/messages/send-media</code>
-                  </div>
-                </div>
-
-                <div className="bg-[#1f1f1f] rounded-2xl overflow-hidden border border-[#333] shadow-md w-full">
-                  <div className="overflow-x-auto w-full">
-                    <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-[#c792ea] leading-loose">
-{`{
-  "sessionKey": "device-01",
-  "to": "628123456789",
-  "type": "document", // Tersedia: image, document, video
-  "url": "https://domain.com/invoice.pdf",
-  "caption": "Berikut adalah tagihan Anda bulan ini."
-}`}
-                    </pre>
-                  </div>
-                </div>
-              </section>
-
-              <hr className="border-slate-100" />
-
-              {/* Send Location */}
-              <section className="space-y-4">
-                <div className="space-y-2">
-                  <h2 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Kirim Lokasi Peta</h2>
-                  <div className="flex items-center gap-3 flex-wrap">
-                    <span className="px-3 py-1 bg-emerald-50 text-emerald-600 text-[10px] font-bold uppercase tracking-wider rounded-md border border-emerald-200">POST</span>
-                    <code className="text-sm font-bold text-slate-600 bg-[#f0f4f9] px-2 py-0.5 rounded break-all">/v1/messages/send-location</code>
-                  </div>
-                </div>
-
-                <div className="bg-[#1f1f1f] rounded-2xl overflow-hidden border border-[#333] shadow-md w-full">
-                  <div className="overflow-x-auto w-full">
-                    <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-[#ffcb6b] leading-loose">
-{`{
-  "sessionKey": "device-01",
-  "to": "628123456789",
-  "latitude": -6.200000,
-  "longitude": 106.816666,
-  "name": "Kantor Pusat",
-  "address": "Jl. Sudirman No. 1, Jakarta"
-}`}
-                    </pre>
-                  </div>
-                </div>
-              </section>
-            </div>
-          )}
-
-          {/* TAB 3: SESSIONS */}
-          {activeTab === "sessions" && (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
-              <div className="space-y-4">
-                <h2 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Cek Status Sesi</h2>
-                <p className="text-sm text-slate-600 leading-relaxed max-w-3xl">
-                  Gunakan endpoint ini untuk memantau apakah nomor WhatsApp (device) Anda sedang dalam status terhubung (<code className="text-emerald-600 font-bold bg-emerald-50 px-1 rounded">connected</code>) atau terputus.
-                </p>
+              <h2 className="text-xl md:text-2xl font-bold text-slate-800">Messaging Endpoints</h2>
+
+              <div className="space-y-3">
+                <EndpointCard method="POST" path="/api/messages/send" desc="Kirim text message." />
+                <EndpointCard
+                  method="POST"
+                  path="/api/messages/send-interactive"
+                  desc="Kirim interactive: buttons, quick_reply, list, cta, template."
+                />
+                <EndpointCard
+                  method="POST"
+                  path="/api/messages/send-media"
+                  desc="Unified media sender: image, video, document, audio, voice_note, sticker, location."
+                />
+                <EndpointCard method="POST" path="/api/messages/send-location" desc="Kirim lokasi lat/long." />
               </div>
 
-              <div className="flex items-center gap-3 flex-wrap">
-                <span className="px-3 py-1 bg-[#e9eef6] text-[#0b57d0] text-[10px] font-bold uppercase tracking-wider rounded-md border border-[#c2e7ff]">GET</span>
-                <code className="text-sm font-bold text-slate-600 bg-[#f0f4f9] px-2 py-0.5 rounded break-all">/v1/sessions</code>
-              </div>
+              <CodeBlock
+                title="JSON - send text"
+                code={`{
+  "sessionKey": "device-01",
+  "to": "628123456789",
+  "text": "Halo, ini notifikasi dari sistem."
+}`}
+              />
 
-              <div className="bg-[#1f1f1f] rounded-2xl overflow-hidden border border-[#333] shadow-md mt-4 w-full">
-                 <div className="bg-[#2d2d2d] px-4 py-2 border-b border-[#444] flex items-center">
-                    <span className="text-[10px] font-mono text-slate-300">Response (200 OK)</span>
-                 </div>
-                <div className="overflow-x-auto w-full">
-                  <pre className="p-4 md:p-5 text-xs md:text-sm font-mono text-[#c3e88d] leading-loose">
-{`{
-  "ok": true,
-  "data": [
+              <CodeBlock
+                title="JSON - send interactive list"
+                code={`{
+  "sessionKey": "device-01",
+  "to": "628123456789",
+  "kind": "list",
+  "body": "Silakan pilih konfirmasi Anda:",
+  "buttonText": "Pilih",
+  "sections": [
     {
-      "session_key": "device-01",
-      "status": "connected",
-      "phone_number": "62895412144456"
+      "title": "Konfirmasi",
+      "rows": [
+        { "title": "Ya", "description": "Lanjutkan pesanan", "rowId": "yes" },
+        { "title": "Tidak", "description": "Batalkan", "rowId": "no" }
+      ]
     }
   ]
 }`}
-                  </pre>
-                </div>
-              </div>
+              />
+
+              <CodeBlock
+                title="Multipart - send media upload"
+                code={`curl --request POST http://localhost:3001/api/messages/send-media \\
+  --header 'x-api-key: live_xxx' \\
+  --form 'sessionKey=device-01' \\
+  --form 'to=628123456789' \\
+  --form 'type=image' \\
+  --form 'caption=Promo hari ini' \\
+  --form 'file=@C:/tmp/promo.jpg'`}
+              />
+
+              <CodeBlock
+                title="JSON - send media via URL"
+                code={`{
+  "sessionKey": "device-01",
+  "to": "628123456789",
+  "type": "document",
+  "url": "https://domain.com/invoice.pdf",
+  "caption": "Invoice terbaru"
+}`}
+              />
             </div>
           )}
 
-          {/* TAB 4: WEBHOOKS */}
+          {activeTab === "sessions" && (
+            <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
+              <h2 className="text-xl md:text-2xl font-bold text-slate-800">Session Endpoints</h2>
+              <div className="space-y-3">
+                <EndpointCard method="POST" path="/api/sessions/start" desc="Start atau reconnect session." />
+                <EndpointCard method="POST" path="/api/sessions/stop" desc="Stop runtime socket session." />
+                <EndpointCard method="POST" path="/api/sessions/delete" desc="Hapus session dan auth state lokal." />
+                <EndpointCard method="GET" path="/api/sessions/qr?sessionKey=..." desc="Ambil QR session." />
+                <EndpointCard method="GET" path="/api/ui/sessions" desc="List sessions untuk inbox/dashboard." />
+              </div>
+
+              <CodeBlock
+                title="JSON - start session"
+                code={`{
+  "sessionKey": "device-01"
+}`}
+              />
+            </div>
+          )}
+
+          {activeTab === "broadcast" && (
+            <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
+              <h2 className="text-xl md:text-2xl font-bold text-slate-800">Broadcast Endpoints</h2>
+              <div className="space-y-3">
+                <EndpointCard
+                  method="POST"
+                  path="/api/broadcast/create"
+                  desc="Buat broadcast job. Mendukung text/media/location + templateId + schedule + upload file."
+                />
+                <EndpointCard method="GET" path="/api/broadcast/jobs" desc="List job broadcast tenant." />
+                <EndpointCard method="GET" path="/api/broadcast/:id" desc="Detail job." />
+                <EndpointCard method="GET" path="/api/broadcast/:id/items" desc="Detail item target per job." />
+                <EndpointCard method="POST" path="/api/broadcast/:id/pause" desc="Pause job." />
+                <EndpointCard method="POST" path="/api/broadcast/:id/resume" desc="Resume job." />
+                <EndpointCard method="POST" path="/api/broadcast/:id/cancel" desc="Cancel job." />
+                <EndpointCard method="DELETE" path="/api/broadcast/:id" desc="Hapus job dan item." />
+              </div>
+
+              <CodeBlock
+                title="JSON - create broadcast"
+                code={`{
+  "sessionKey": "device-01",
+  "name": "Campaign Promo Pagi",
+  "msgType": "text",
+  "text": "Halo {{nama}}, ada promo untuk Anda",
+  "targets": ["628123456789", "628222222222"],
+  "delayMs": 1500,
+  "scheduledAt": "2026-03-10T10:30"
+}`}
+              />
+            </div>
+          )}
+
           {activeTab === "webhooks" && (
             <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
-              <div className="space-y-4">
-                <h2 className="text-xl md:text-2xl font-bold text-slate-800 tracking-tight">Webhook Events & Keamanan</h2>
-                <p className="text-sm text-slate-600 leading-relaxed max-w-3xl">
-                  Sistem kami akan mengirimkan HTTP POST ke URL Webhook Anda setiap kali terjadi aktivitas. Berikut adalah format event yang akan Anda terima.
-                </p>
+              <h2 className="text-xl md:text-2xl font-bold text-slate-800">Webhook Endpoints</h2>
+              <div className="space-y-3">
+                <EndpointCard method="GET" path="/api/webhooks" desc="Ambil konfigurasi webhook tenant aktif." />
+                <EndpointCard method="POST" path="/api/webhooks/set" desc="Set URL, secret, events, dan status webhook." />
+                <EndpointCard method="GET" path="/api/push/vapid-public-key" desc="Ambil public key VAPID untuk subscribe browser push." />
+                <EndpointCard method="POST" path="/api/push/subscribe" desc="Simpan subscription browser push ke tenant aktif." />
+                <EndpointCard method="POST" path="/api/push/test" desc="Kirim test push ke subscription aktif tenant." />
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                <div className="p-5 rounded-2xl bg-[#f8fafd] border border-slate-100">
-                  <div className="w-8 h-8 bg-white text-[#0b57d0] rounded-full flex items-center justify-center font-bold mb-3 shadow-sm border border-slate-200">1</div>
-                  <h3 className="font-bold text-slate-800 mb-1.5 text-sm">message.incoming</h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">Nomor WhatsApp Anda menerima pesan teks/media baru.</p>
-                </div>
-                <div className="p-5 rounded-2xl bg-emerald-50 border border-emerald-100">
-                  <div className="w-8 h-8 bg-white text-emerald-600 rounded-full flex items-center justify-center font-bold mb-3 shadow-sm border border-emerald-200">2</div>
-                  <h3 className="font-bold text-slate-800 mb-1.5 text-sm">message.status</h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">Status pesan keluar berubah (<span className="italic">sent, delivered, read</span>).</p>
-                </div>
-                <div className="p-5 rounded-2xl bg-amber-50 border border-amber-100">
-                  <div className="w-8 h-8 bg-white text-amber-600 rounded-full flex items-center justify-center font-bold mb-3 shadow-sm border border-amber-200">3</div>
-                  <h3 className="font-bold text-slate-800 mb-1.5 text-sm">session.update</h3>
-                  <p className="text-xs text-slate-500 leading-relaxed">Sesi WA terputus atau terhubung ulang.</p>
-                </div>
-              </div>
+              <CodeBlock
+                title="JSON - set webhook"
+                code={`{
+  "url": "https://example.com/webhook/wa",
+  "status": "active",
+  "events": [
+    "message.incoming",
+    "message.status",
+    "session.update",
+    "broadcast.status",
+    "broadcast.reply",
+    "followup.sent",
+    "followup.replied",
+    "lead.created"
+  ]
+}`}
+              />
 
-              <div className="p-5 md:p-8 rounded-3xl bg-[#001d35] text-white mt-8 shadow-sm overflow-hidden w-full">
-                <h3 className="text-lg font-bold tracking-tight mb-3">Custom Headers & HMAC Signature</h3>
-                <p className="text-sm text-[#c2e7ff] leading-relaxed mb-6">
-                  Setiap request dari sistem kami akan membawa header wajib berikut:
-                </p>
-                <div className="space-y-3 w-full">
-                  <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-4 w-full">
-                    <code className="text-xs bg-[#0b57d0] px-2 py-1 rounded text-white font-mono w-max md:w-48 shrink-0 break-all">X-Webhook-Event</code>
-                    <span className="text-xs text-slate-300">Tipe event (contoh: message.incoming)</span>
-                  </div>
-                  <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-4 w-full">
-                    <code className="text-xs bg-[#0b57d0] px-2 py-1 rounded text-white font-mono w-max md:w-48 shrink-0 break-all">X-Webhook-Delivery-Id</code>
-                    <span className="text-xs text-slate-300">ID unik pengiriman (untuk mencegah duplikasi)</span>
-                  </div>
-                  <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-4 w-full">
-                    <code className="text-xs bg-[#0b57d0] px-2 py-1 rounded text-white font-mono w-max md:w-48 shrink-0 break-all">X-Webhook-Tenant</code>
-                    <span className="text-xs text-slate-300">ID Tenant SaaS Anda</span>
-                  </div>
-                  <div className="flex flex-col md:flex-row md:items-start gap-1 md:gap-4 pt-2 w-full">
-                    <code className="text-xs bg-rose-500/20 border border-rose-500/50 px-2 py-1 rounded text-rose-300 font-mono w-max md:w-48 shrink-0 break-all">X-Webhook-Signature</code>
-                    <span className="text-xs text-slate-300">Validasi HMAC-SHA256 dari request body menggunakan rahasia (secret) Anda.</span>
-                  </div>
-                </div>
-              </div>
+              <CodeBlock
+                title="Webhook Headers"
+                code={`X-Webhook-Event: message.incoming
+X-Webhook-Delivery-Id: <unique-id>
+X-Webhook-Tenant: <tenant-id>
+X-Webhook-Signature: <hmac-sha256>`}
+              />
             </div>
           )}
 
-        </div>
-      </div>
+          {activeTab === "admin" && (
+            <div className="space-y-8 animate-in slide-in-from-right-4 duration-300">
+              <h2 className="text-xl md:text-2xl font-bold text-slate-800">Admin & Billing (Superadmin Only)</h2>
+              <p className="text-sm text-slate-600">
+                Seluruh endpoint di bawah hanya untuk role <code>admin</code>.
+              </p>
 
-      {/* FOOTER CTA */}
-      <div className="p-6 md:p-10 bg-[#f0f4f9] rounded-3xl border border-[#c2e7ff] flex flex-col md:flex-row items-center justify-between gap-6 overflow-hidden">
-        <div className="space-y-1 text-center md:text-left min-w-0">
-          <h3 className="text-lg font-bold text-slate-800">Butuh Bantuan Integrasi?</h3>
-          <p className="text-sm text-slate-600 leading-relaxed max-w-xl break-words">
-            Tim developer kami siap membantu Anda menyambungkan ERP, CRM, atau sistem bisnis internal Anda.
-          </p>
+              <div className="space-y-3">
+                <EndpointCard method="GET" path="/api/admin/tenants" desc="List tenant + status subscription + limit snapshot." />
+                <EndpointCard method="POST" path="/api/admin/tenants" desc="Buat tenant baru + owner + subscription." />
+                <EndpointCard method="PUT" path="/api/admin/tenants/:id/limits" desc="Update status & limit subscription tenant." />
+                <EndpointCard method="GET" path="/api/admin/plans" desc="List paket billing." />
+                <EndpointCard method="POST" path="/api/admin/plans" desc="Create/update paket billing." />
+                <EndpointCard method="GET" path="/api/admin/tenants/:tenantId/subscription" desc="Get subscription terbaru tenant." />
+                <EndpointCard method="POST" path="/api/admin/tenants/:tenantId/subscription" desc="Buat subscription baru tenant." />
+                <EndpointCard method="POST" path="/api/admin/tenants/:tenantId/subscription/:id/status" desc="Ubah status subscription." />
+                <EndpointCard method="GET" path="/api/admin/tenants/:tenantId/payments" desc="List payment tenant." />
+                <EndpointCard method="POST" path="/api/admin/tenants/:tenantId/payments" desc="Create payment record." />
+              </div>
+
+              <CodeBlock
+                title="JSON - update tenant limits"
+                code={`{
+  "sub_status": "active",
+  "limit_sessions": 5,
+  "limit_messages_daily": 5000,
+  "limit_broadcast_daily": 20
+}`}
+              />
+            </div>
+          )}
         </div>
-        <button className="px-8 py-3.5 bg-white text-[#0b57d0] border border-slate-200 rounded-full font-bold text-sm hover:bg-[#e9eef6] active:scale-95 transition-all shadow-sm shrink-0 whitespace-nowrap">
-          Hubungi Engineer
-        </button>
       </div>
-      
     </div>
-  );
-}
-
-// Icon Helper untuk Judul
-function TerminalIcon(props: any) {
-  return (
-    <svg
-      {...props}
-      xmlns="http://www.w3.org/2000/svg"
-      width="24"
-      height="24"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" x2="20" y1="19" y2="19" />
-    </svg>
   );
 }

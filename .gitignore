@@ -23,6 +23,7 @@ logs
 
 # runtime storage (baileys)
 apps/api/storage/baileys/
+apps/api/storage/uploads/
 apps/api/storage/*.json
 
 # tmp

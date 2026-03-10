@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo } from "react";
 import {
   CalendarClock, Plus, Users, Clock, Target, Play, Pause, Trash2,
-  CheckCircle2, XCircle, MessageSquare, RefreshCw, Activity, CopyPlus, Layers, ArrowLeft
+  CheckCircle2, XCircle, MessageSquare, RefreshCw, Activity, CopyPlus, Layers, ArrowLeft, ChevronDown, ChevronRight
 } from "lucide-react";
 
 import { useConfirm } from "../App";
@@ -83,6 +83,8 @@ export default function AutoFollowUp() {
   const [manualLeadsModalOpen, setManualLeadsModalOpen] = useState(false);
   const [manualLeadsText, setManualLeadsText] = useState("");
   const [manualLeadsLoading, setManualLeadsLoading] = useState(false);
+  const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
+  const [sidebarStatusFilter, setSidebarStatusFilter] = useState<'all' | 'active' | 'paused' | 'completed'>('all');
 
   async function handleAddManualLeads() {
     if (!selectedCampaign) return;
@@ -132,6 +134,28 @@ export default function AutoFollowUp() {
       campaigns: camps.sort((a, b) => a.delay_days - b.delay_days)
     }));
   }, [campaigns]);
+
+  const visibleGroupedCampaigns = useMemo(() => {
+    return groupedCampaigns
+      .map(group => ({
+        ...group,
+        allCampaigns: group.campaigns,
+        campaigns: sidebarStatusFilter === 'all'
+          ? group.campaigns
+          : group.campaigns.filter(c => c.status === sidebarStatusFilter)
+      }))
+      .filter(group => group.campaigns.length > 0);
+  }, [groupedCampaigns, sidebarStatusFilter]);
+
+  useEffect(() => {
+    setCollapsedGroups(prev => {
+      const next: Record<string, boolean> = { ...prev };
+      groupedCampaigns.forEach(g => {
+        if (typeof next[g.baseName] === "undefined") next[g.baseName] = false;
+      });
+      return next;
+    });
+  }, [groupedCampaigns]);
 
   useEffect(() => {
     const timer = setInterval(() => setLiveTime(new Date()), 1000);
@@ -272,6 +296,76 @@ export default function AutoFollowUp() {
     } catch (e: any) { alert("Gagal hapus: " + e.message); }
   }
 
+  const toggleGroupCollapse = (baseName: string) => {
+    setCollapsedGroups(prev => ({ ...prev, [baseName]: !prev[baseName] }));
+  };
+
+  async function setGroupStatus(group: { baseName: string; allCampaigns: CampaignRow[] }, status: 'active' | 'paused') {
+    const candidates = group.allCampaigns.filter(c => c.status !== status);
+    if (candidates.length === 0) return;
+
+    const isConfirmed = await confirm({
+      title: status === 'paused' ? "Jeda Semua Step" : "Aktifkan Semua Step",
+      message: `${status === 'paused' ? 'Jeda' : 'Aktifkan'} ${candidates.length} step di group "${group.baseName}"?`,
+      confirmText: status === 'paused' ? "Jeda Semua" : "Aktifkan Semua",
+      isDanger: false
+    });
+    if (!isConfirmed) return;
+
+    try {
+      await Promise.all(candidates.map(c =>
+        apiFetch(`followup/campaigns/${c.id}/status`, {
+          method: "PUT",
+          body: JSON.stringify({ status })
+        })
+      ));
+      await loadData(false);
+
+      if (selectedCampaign && group.allCampaigns.some(c => c.id === selectedCampaign.id)) {
+        setSelectedCampaign({ ...selectedCampaign, status });
+      }
+    } catch (e: any) {
+      alert(`Gagal ${status === 'paused' ? 'menjeda' : 'mengaktifkan'} group: ${e.message}`);
+    }
+  }
+
+  async function deleteGroup(group: { baseName: string; allCampaigns: CampaignRow[] }) {
+    const ids = group.allCampaigns.map(c => c.id);
+    if (!ids.length) return;
+
+    const isConfirmed = await confirm({
+      title: "Hapus Group Campaign",
+      message: `Hapus permanen group "${group.baseName}" beserta ${ids.length} step dan semua antrean target?`,
+      confirmText: "Hapus Group",
+      isDanger: true
+    });
+    if (!isConfirmed) return;
+
+    try {
+      await Promise.all(ids.map(id => apiFetch(`followup/campaigns/${id}`, { method: "DELETE" })));
+      if (selectedCampaign && ids.includes(selectedCampaign.id)) setSelectedCampaign(null);
+      await loadData(true);
+    } catch (e: any) {
+      alert("Gagal hapus group: " + e.message);
+    }
+  }
+
+  async function handleDeleteTarget(targetId: number, targetNumber: string) {
+    const isConfirmed = await confirm({
+      title: "Hapus Target",
+      message: `Hapus nomor ${targetNumber} dari antrean campaign ini?`,
+      confirmText: "Hapus",
+      isDanger: true
+    });
+
+    if (!isConfirmed) return;
+
+    try {
+      await apiFetch(`followup/targets/${targetId}`, { method: "DELETE" });
+      if (selectedCampaign) loadTargets(selectedCampaign.id);
+    } catch (e: any) { alert("Gagal hapus target: " + e.message); }
+  }
+
   async function triggerWorker() {
     try {
       setWorkerLoading(true);
@@ -331,66 +425,141 @@ export default function AutoFollowUp() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-4 py-5 scrollbar-hide">
-          {groupedCampaigns.length === 0 && !loading && (
+          <div className="mb-4 bg-white rounded-2xl border border-slate-200 p-2">
+            <div className="grid grid-cols-4 gap-1">
+              {[
+                { id: 'all', label: 'Semua' },
+                { id: 'active', label: 'Active' },
+                { id: 'paused', label: 'Paused' },
+                { id: 'completed', label: 'Done' }
+              ].map(f => (
+                <button
+                  key={f.id}
+                  onClick={() => setSidebarStatusFilter(f.id as any)}
+                  className={`px-2 py-1.5 rounded-lg text-[10px] font-bold uppercase tracking-wider transition-colors ${
+                    sidebarStatusFilter === f.id
+                      ? 'bg-[#0b57d0] text-white'
+                      : 'bg-[#f8fafd] text-slate-600 hover:bg-slate-100'
+                  }`}
+                >
+                  {f.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {visibleGroupedCampaigns.length === 0 && !loading && (
             <div className="text-center p-6 mt-10">
               <Target size={40} className="mx-auto text-slate-300 mb-3" />
-              <p className="text-sm font-medium text-slate-500">Belum ada Rangkaian Follow Up.<br />Buat baru untuk mulai menjadwalkan.</p>
+              <p className="text-sm font-medium text-slate-500">
+                Tidak ada campaign untuk filter ini.<br />
+                Coba ubah filter status atau buat sequence baru.
+              </p>
             </div>
           )}
 
-          {groupedCampaigns.map((group) => (
-            <div key={group.baseName} className="mb-6">
-              {/* Folder/Group Header */}
-              <div className="flex items-center gap-2 mb-3 pl-2">
-                {group.isSequence ? <Layers size={14} className="text-[#0b57d0]" /> : <MessageSquare size={14} className="text-slate-400" />}
-                <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider truncate">{group.baseName}</h4>
-                {group.isSequence && <span className="text-[9px] bg-[#c2e7ff] text-[#001d35] px-1.5 py-0.5 rounded font-bold tracking-widest">SEQ</span>}
-              </div>
-
-              {/* Group Items (Timeline) */}
-              <div className="space-y-2 relative">
-                {group.isSequence && (
-                  <div className="absolute top-4 bottom-4 left-[23px] w-0.5 bg-slate-200 z-0"></div>
-                )}
-
-                {group.campaigns.map((camp, cIdx) => {
-                  const isSelected = selectedCampaign?.id === camp.id;
-                  const stepLabel = group.isSequence && camp.name.includes(" - ") ? camp.name.split(" - ")[1] : camp.name;
-
-                  return (
-                    <div
-                      key={camp.id}
-                      onClick={() => setSelectedCampaign(camp)}
-                      className={`relative z-10 p-3.5 flex flex-col gap-2 rounded-2xl cursor-pointer transition-colors border ${isSelected
-                        ? "bg-[#c2e7ff] border-transparent ml-2"
-                        : "bg-white border-slate-100 hover:bg-[#f0f4f9] ml-0"
-                        }`}
-                    >
-                      <div className="flex justify-between items-start">
-                        <div className="flex items-center gap-3">
-                          {group.isSequence && (
-                            <div className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-colors ${isSelected ? 'bg-[#0b57d0] border-[#0b57d0] text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
-                              {cIdx + 1}
-                            </div>
-                          )}
-                          <h3 className={`text-[14px] font-bold truncate leading-tight ${isSelected ? 'text-[#001d35]' : 'text-slate-800'}`}>{stepLabel}</h3>
-                        </div>
-                        <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border shrink-0 ml-2 ${camp.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
-                          camp.status === 'paused' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-500 border-slate-200'
-                          }`}>
-                          {camp.status}
-                        </span>
-                      </div>
-                      <div className={`flex items-center gap-3 text-[10px] font-medium transition-colors ${isSelected ? 'text-[#001d35] opacity-80 pl-9' : 'text-slate-500 pl-9'}`}>
-                        <div className="flex items-center gap-1"><Clock size={12} className={camp.status === 'active' ? 'text-[#0b57d0]' : 'text-slate-400'} /> H+{camp.delay_days} | {camp.target_time}</div>
-                        <div className="flex items-center gap-1"><CheckCircle2 size={12} className={camp.status === 'active' ? 'text-emerald-600' : 'text-slate-400'} /> {camp.trigger_condition === 'always' ? 'Selalu' : 'Kecuali Dibalas'}</div>
-                      </div>
+          {visibleGroupedCampaigns.map((group, gIdx) => {
+            const activeCount = group.allCampaigns.filter(c => c.status === "active").length;
+            const pausedCount = group.allCampaigns.filter(c => c.status === "paused").length;
+            const isCollapsed = !!collapsedGroups[group.baseName];
+            return (
+              <div key={group.baseName} className="mb-5 last:mb-0">
+                <div className="rounded-2xl border border-slate-200 bg-white/80 backdrop-blur-sm p-3.5">
+                  {/* Folder/Group Header */}
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <div className="min-w-0 flex items-center gap-2">
+                      {group.isSequence ? <Layers size={14} className="text-[#0b57d0]" /> : <MessageSquare size={14} className="text-slate-400" />}
+                      <h4 className="text-xs font-bold text-slate-700 uppercase tracking-wider truncate">{group.baseName}</h4>
                     </div>
-                  );
-                })}
+                    <div className="flex items-center gap-1.5 shrink-0 ml-2">
+                      {group.isSequence && <span className="text-[9px] bg-[#c2e7ff] text-[#001d35] px-1.5 py-0.5 rounded font-bold tracking-widest">SEQ</span>}
+                      <span className="text-[9px] bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded font-bold tracking-wider">{group.allCampaigns.length} STEP</span>
+                      <span className="text-[9px] bg-emerald-50 text-emerald-700 px-1.5 py-0.5 rounded font-bold tracking-wider">{activeCount} ACTIVE</span>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between mb-3 px-1">
+                    <button
+                      onClick={() => toggleGroupCollapse(group.baseName)}
+                      className="flex items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-600 hover:text-[#0b57d0] transition-colors"
+                    >
+                      {isCollapsed ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                      {isCollapsed ? "Expand Group" : "Collapse Group"}
+                    </button>
+                    <div className="flex items-center gap-1.5">
+                      <button
+                        onClick={() => setGroupStatus(group, 'paused')}
+                        disabled={activeCount === 0}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-amber-50 text-amber-700 border border-amber-100 hover:bg-amber-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Jeda semua step dalam group"
+                      >
+                        Pause All
+                      </button>
+                      <button
+                        onClick={() => setGroupStatus(group, 'active')}
+                        disabled={pausedCount === 0}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        title="Aktifkan semua step dalam group"
+                      >
+                        Resume All
+                      </button>
+                      <button
+                        onClick={() => deleteGroup(group)}
+                        className="px-2 py-1 rounded-lg text-[10px] font-bold uppercase tracking-wider bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-100 transition-colors"
+                        title="Hapus semua step dalam group"
+                      >
+                        Delete All
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Group Items (Timeline) */}
+                  {!isCollapsed && <div className="space-y-2 relative">
+                    {group.isSequence && (
+                      <div className="absolute top-4 bottom-4 left-[23px] w-0.5 bg-slate-200 z-0"></div>
+                    )}
+
+                    {group.campaigns.map((camp, cIdx) => {
+                      const isSelected = selectedCampaign?.id === camp.id;
+                      const stepLabel = group.isSequence && camp.name.includes(" - ") ? camp.name.split(" - ")[1] : camp.name;
+
+                      return (
+                        <div
+                          key={camp.id}
+                          onClick={() => setSelectedCampaign(camp)}
+                          className={`relative z-10 p-3.5 flex flex-col gap-2 rounded-2xl cursor-pointer transition-colors border ${isSelected
+                            ? "bg-[#c2e7ff] border-transparent ml-2 shadow-sm"
+                            : "bg-white border-slate-100 hover:bg-[#f0f4f9] ml-0"
+                            }`}
+                        >
+                          <div className="flex justify-between items-start">
+                            <div className="flex items-center gap-3">
+                              {group.isSequence && (
+                                <div className={`w-6 h-6 shrink-0 rounded-full flex items-center justify-center text-[10px] font-bold border-2 transition-colors ${isSelected ? 'bg-[#0b57d0] border-[#0b57d0] text-white' : 'bg-white border-slate-200 text-slate-600'}`}>
+                                  {cIdx + 1}
+                                </div>
+                              )}
+                              <h3 className={`text-[14px] font-bold truncate leading-tight ${isSelected ? 'text-[#001d35]' : 'text-slate-800'}`}>{stepLabel}</h3>
+                            </div>
+                            <span className={`px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border shrink-0 ml-2 ${camp.status === 'active' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' :
+                              camp.status === 'paused' ? 'bg-amber-50 text-amber-600 border-amber-100' : 'bg-slate-50 text-slate-500 border-slate-200'
+                              }`}>
+                              {camp.status}
+                            </span>
+                          </div>
+                          <div className={`flex items-center gap-3 text-[10px] font-medium transition-colors ${isSelected ? 'text-[#001d35] opacity-80 pl-9' : 'text-slate-500 pl-9'}`}>
+                            <div className="flex items-center gap-1"><Clock size={12} className={camp.status === 'active' ? 'text-[#0b57d0]' : 'text-slate-400'} /> H+{camp.delay_days} | {camp.target_time}</div>
+                            <div className="flex items-center gap-1"><CheckCircle2 size={12} className={camp.status === 'active' ? 'text-emerald-600' : 'text-slate-400'} /> {camp.trigger_condition === 'always' ? 'Selalu' : 'Kecuali Dibalas'}</div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>}
+                </div>
+                {gIdx < visibleGroupedCampaigns.length - 1 && <div className="h-px bg-slate-200/80 my-4 mx-1" />}
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
       </div>
 
@@ -481,13 +650,14 @@ export default function AutoFollowUp() {
                       <th className="py-3 px-5">Nomor Tujuan</th>
                       <th className="py-3 px-5">Status</th>
                       <th className="py-3 px-5">Jadwal / Waktu Update</th>
+                      <th className="py-3 px-5 text-right">Aksi</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-50">
                     {targets.length === 0 ? (
                       <tr>
-                        <td colSpan={3} className="py-10 text-center text-sm font-medium text-slate-400">
-                          Belum ada target prospek.<br />Tambahkan prospek baru melalui menu Inbox.
+                        <td colSpan={4} className="py-10 text-center text-sm font-medium text-slate-400">
+                          Belum ada target prospek.
                         </td>
                       </tr>
                     ) : (
@@ -508,6 +678,11 @@ export default function AutoFollowUp() {
                           <td className="py-3 px-5 text-xs text-slate-500">
                             {new Date(t.status === 'queued' ? t.scheduled_at : (t.sent_at || t.scheduled_at)).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
                             {t.status !== 'queued' && <span className="ml-2 text-[9px] uppercase bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold border border-slate-200">Aktual</span>}
+                          </td>
+                          <td className="py-3 px-5 text-right">
+                            <button onClick={() => handleDeleteTarget(t.id, t.to_number)} className="text-rose-400 hover:text-rose-600 bg-rose-50 p-1.5 rounded-lg transition-colors" title="Hapus Target">
+                              <Trash2 size={14} />
+                            </button>
                           </td>
                         </tr>
                       ))
@@ -540,7 +715,12 @@ export default function AutoFollowUp() {
                         <span className="text-[11px] text-slate-500">
                           {new Date(t.status === 'queued' ? t.scheduled_at : (t.sent_at || t.scheduled_at)).toLocaleString('id-ID', { dateStyle: 'medium', timeStyle: 'short' })}
                         </span>
-                        {t.status !== 'queued' && <span className="text-[8px] uppercase bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold border border-slate-200">Aktual</span>}
+                        <div className="flex items-center gap-2">
+                           {t.status !== 'queued' && <span className="text-[8px] uppercase bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded font-bold border border-slate-200">Aktual</span>}
+                           <button onClick={() => handleDeleteTarget(t.id, t.to_number)} className="text-rose-400 hover:text-rose-600 bg-rose-50 p-1 rounded transition-colors" title="Hapus Target">
+                             <Trash2 size={12} />
+                           </button>
+                        </div>
                       </div>
                       {t.last_error && <p className="text-[10px] text-rose-500 leading-tight">{t.last_error}</p>}
                     </div>

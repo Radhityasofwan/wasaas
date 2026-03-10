@@ -53,7 +53,7 @@ export default function Shell() {
           <div className="space-y-1">
             <Item to="/" label="Dashboard" />
             <Item to="/sessions" label="Sessions (Multi device)" />
-            <Item to="/inbox" label="Inbox (Chat UI)" />
+
             <Item to="/broadcast" label="Broadcast / Blast" />
             <Item to="/api-keys" label="API Keys" />
             <Item to="/webhooks" label="Webhooks" />

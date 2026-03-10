@@ -40,7 +40,7 @@ async function apiFetch<T>(path: string, init: RequestInit = {}): Promise<T> {
 type TemplateRow = {
   id: number;
   name: string;
-  message_type: 'text' | 'image' | 'document' | 'location';
+  message_type: 'text' | 'image' | 'video' | 'document' | 'audio' | 'voice_note' | 'sticker' | 'location';
   text_body: string | null;
   media_url: string | null;
   category: 'broadcast' | 'follow_up' | 'general';
@@ -142,6 +142,29 @@ export default function Templates() {
     if (!formData.name.trim() || (!formData.text_body?.trim() && formData.message_type === 'text')) {
       return alert("Nama dan isi pesan wajib diisi!");
     }
+
+    const isMediaType = formData.message_type !== "text" && formData.message_type !== "location";
+    const mediaUrlValue = String(formData.media_url || "").trim();
+    const isLocationValid = (() => {
+      if (formData.message_type !== "location") return true;
+      const [latRaw, lngRaw] = mediaUrlValue.split(",");
+      const lat = Number(latRaw);
+      const lng = Number(lngRaw);
+      return Number.isFinite(lat) && Number.isFinite(lng);
+    })();
+
+    if (isMediaType) {
+      if (mediaSource === "upload" && !mediaFile) {
+        return alert("Pilih file upload untuk template media.");
+      }
+      if (mediaSource === "url" && !mediaUrlValue) {
+        return alert("Isi URL media untuk template media.");
+      }
+    }
+
+    if (!isLocationValid) {
+      return alert("Format lokasi harus lat,lng. Contoh: -6.200000,106.816666");
+    }
     
     const isMultipart = mediaSource === 'upload' && mediaFile !== null && formData.message_type !== 'text';
     let body: any;
@@ -219,10 +242,38 @@ export default function Templates() {
   const getTypeIcon = (type: string) => {
     switch (type) {
       case 'image': return <ImageIcon size={18} className="text-emerald-500" />;
+      case 'video': return <Type size={18} className="text-cyan-500" />;
+      case 'audio': return <Type size={18} className="text-violet-500" />;
+      case 'voice_note': return <Type size={18} className="text-rose-500" />;
+      case 'sticker': return <Type size={18} className="text-fuchsia-500" />;
       case 'document': return <FileText size={18} className="text-[#0b57d0]" />;
       case 'location': return <MapPin size={18} className="text-amber-500" />;
       default: return <Type size={18} className="text-indigo-500" />;
     }
+  };
+
+  const useCurrentDeviceLocationForTemplate = () => {
+    if (!navigator.geolocation) {
+      alert("Browser ini tidak mendukung geolocation.");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = String(pos.coords.latitude);
+        const lng = String(pos.coords.longitude);
+        setFormData(prev => ({ ...prev, media_url: `${lat},${lng}` }));
+        try {
+          window.open(`https://www.google.com/maps?q=${lat},${lng}`, "_blank", "noopener,noreferrer");
+        } catch {
+          // ignore
+        }
+      },
+      (err) => {
+        alert(`Gagal mengambil lokasi perangkat: ${err.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
   };
 
   return (
@@ -383,7 +434,7 @@ export default function Templates() {
               <div>
                 <label className="text-xs font-bold text-slate-700 block mb-2">Tipe Pesan</label>
                 <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
-                  {['text', 'image', 'document', 'location'].map(type => (
+                  {['text', 'image', 'video', 'audio', 'voice_note', 'document', 'sticker', 'location'].map(type => (
                     <button 
                       key={type} onClick={() => setFormData({...formData, message_type: type as any})}
                       className={`py-2.5 rounded-xl text-[11px] font-bold uppercase tracking-wider flex justify-center items-center gap-2 transition-all ${
@@ -422,7 +473,13 @@ export default function Templates() {
                         type="file" 
                         onChange={(e) => setMediaFile(e.target.files?.[0] || null)}
                         className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
-                        accept={formData.message_type === 'image' ? 'image/*' : '*/*'}
+                        accept={
+                          formData.message_type === 'image' ? 'image/*' :
+                          formData.message_type === 'video' ? 'video/*' :
+                          formData.message_type === 'audio' || formData.message_type === 'voice_note' ? 'audio/*' :
+                          formData.message_type === 'sticker' ? '.webp,image/webp' :
+                          '*/*'
+                        }
                       />
                       {mediaFile ? (
                         <div className="text-[#0b57d0] font-bold text-sm flex flex-col items-center">
@@ -449,6 +506,13 @@ export default function Templates() {
                     placeholder="-6.200000, 106.816666" 
                     className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-800 focus:ring-2 focus:ring-[#c2e7ff] transition-all"
                   />
+                  <button
+                    type="button"
+                    onClick={useCurrentDeviceLocationForTemplate}
+                    className="w-full mt-2 px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-[#0b57d0] hover:bg-[#f0f4f9]"
+                  >
+                    Gunakan Lokasi Perangkat & Buka Maps
+                  </button>
                 </div>
               )}
 

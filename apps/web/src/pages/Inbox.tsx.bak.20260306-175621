@@ -160,43 +160,6 @@ function dedupeByPeer(items: any[]) {
   });
 }
 
-function normalizePhoneDigits(input: string): string {
-  let d = String(input || "").replace(/\D/g, "");
-  if (!d) return "";
-  if (d.startsWith("0")) d = `62${d.slice(1)}`;
-  if (d.startsWith("8")) d = `62${d}`;
-  return d;
-}
-
-function msgIdentity(msg: Partial<MsgRow>): string {
-  const waId = String(msg.waMessageId || "").trim();
-  if (waId) return `wa:${waId}`;
-  const id = Number(msg.id || 0);
-  if (id) return `id:${id}`;
-  return `sig:${msg.direction || ""}|${msg.type || ""}|${msg.text || msg.textBody || ""}|${msg.time || msg.createdAt || ""}`;
-}
-
-function mergeAndDedupeMessages(base: MsgRow[], incoming: MsgRow[], mode: "append" | "prepend" | "replace"): MsgRow[] {
-  const seed = mode === "replace" ? [] : [...base];
-  const merged = mode === "replace"
-    ? [...incoming]
-    : mode === "append"
-      ? [...seed, ...incoming]
-      : [...incoming, ...seed];
-
-  const seen = new Set<string>();
-  const deduped: MsgRow[] = [];
-  for (const m of merged) {
-    const key = msgIdentity(m);
-    if (seen.has(key)) continue;
-    seen.add(key);
-    deduped.push(m);
-  }
-
-  deduped.sort((a, b) => normalizeDate(a.time || "").getTime() - normalizeDate(b.time || "").getTime());
-  return deduped;
-}
-
 // ============================================================================
 // 3. TYPE DEFINITIONS & FORMATTERS
 // ============================================================================
@@ -209,7 +172,6 @@ export interface SessionRow {
 export interface ConvRow {
   chatId: number;
   peer: string;
-  remoteJid?: string | null;
   name?: string | null;
   unreadCount: number;
   lastMessage: {
@@ -226,26 +188,9 @@ export interface ConvRow {
 
 export interface MsgRow {
   id: number;
-  waMessageId?: string | null;
-  remoteJid?: string | null;
-  createdAt?: string | null;
-  textBody?: string | null;
   direction: "in" | "out";
   type: string;
   text: string | null;
-  interactive?: {
-    kind: "buttons" | "quick_reply" | "list" | "cta" | "template";
-    body?: string;
-    footer?: string;
-    title?: string;
-    buttonText?: string;
-    buttons?: string[];
-    sections?: Array<{ title?: string; rows?: Array<{ title?: string; description?: string }> }>;
-    ctaUrlLabel?: string;
-    ctaUrl?: string;
-    ctaCallLabel?: string;
-    ctaCallNumber?: string;
-  } | null;
   media: any;
   location: any;
   status: string;
@@ -264,56 +209,6 @@ export interface CustomLabel {
   name: string;
   color: string;
 }
-
-type InteractiveKind = "buttons" | "quick_reply" | "list" | "template" | "cta";
-
-interface TemplateRow {
-  id: number;
-  name: string;
-  text_body?: string | null;
-  message_type?: string | null;
-  category?: string | null;
-}
-
-type InteractivePayloadState = {
-  kind: InteractiveKind;
-  body: string;
-  footer: string;
-  title: string;
-  buttonText: string;
-  buttonsText: string;
-  listSectionTitle: string;
-  listRowsText: string;
-  templateId: string;
-  ctaUrlLabel: string;
-  ctaUrl: string;
-  ctaCallLabel: string;
-  ctaCallNumber: string;
-};
-
-const INITIAL_INTERACTIVE_PAYLOAD: InteractivePayloadState = {
-  kind: "buttons",
-  body: "",
-  footer: "",
-  title: "",
-  buttonText: "Pilih",
-  buttonsText: "Ya\nTidak",
-  listSectionTitle: "Pilihan",
-  listRowsText: "Opsi 1|Deskripsi singkat",
-  templateId: "",
-  ctaUrlLabel: "Buka Link",
-  ctaUrl: "",
-  ctaCallLabel: "Hubungi Kami",
-  ctaCallNumber: "",
-};
-
-const INTERACTIVE_KIND_META: Record<InteractiveKind, { label: string; hint: string }> = {
-  buttons: { label: "Buttons", hint: "Kirim tombol pilihan cepat (maks 3)." },
-  quick_reply: { label: "Quick Reply", hint: "Balasan cepat siap klik dari penerima." },
-  list: { label: "List", hint: "List menu dengan beberapa opsi terstruktur." },
-  template: { label: "Template", hint: "Ambil konten dari template text tersimpan." },
-  cta: { label: "CTA", hint: "Tombol aksi URL atau Call ke bisnis Anda." }
-};
 
 export const LABEL_COLORS = [
   'bg-rose-500',
@@ -410,34 +305,6 @@ export function formatContactName(jid: string, name?: string | null): string {
   return `+${num}`;
 }
 
-function extractInteractiveFromLegacyText(text: string | null | undefined) {
-  const body = String(text || "").trim();
-  if (!body) return null;
-  const m = body.match(/^\[(BUTTONS|QUICK_REPLY|LIST|CTA|TEMPLATE)\]\s*(.*)$/i);
-  if (!m) return null;
-  return {
-    kind: String(m[1] || "").toLowerCase() as "buttons" | "quick_reply" | "list" | "cta" | "template",
-    body: String(m[2] || "").trim()
-  } as NonNullable<MsgRow["interactive"]>;
-}
-
-function normalizeInteractiveMessage(msg: MsgRow): NonNullable<MsgRow["interactive"]> | null {
-  if (msg.interactive && msg.interactive.kind) {
-    return {
-      ...msg.interactive,
-      body: String(msg.interactive.body || msg.text || "").trim()
-    } as NonNullable<MsgRow["interactive"]>;
-  }
-  const type = String(msg.type || "").toLowerCase();
-  if (type.startsWith("interactive_")) {
-    return {
-      kind: type.replace("interactive_", "") as "buttons" | "quick_reply" | "list" | "cta" | "template",
-      body: String(msg.text || "").trim()
-    } as NonNullable<MsgRow["interactive"]>;
-  }
-  return extractInteractiveFromLegacyText(msg.text);
-}
-
 // ============================================================================
 // 4. MODULAR SUB-COMPONENTS (UI ABSTRACTIONS)
 // ============================================================================
@@ -463,10 +330,6 @@ interface MessageBubbleProps {
 
 const MessageBubble: React.FC<MessageBubbleProps> = ({ msg, liveTime, isGroup }) => {
   const isOut = msg.direction === "out";
-  const interactive = normalizeInteractiveMessage(msg);
-  const interactiveKind = interactive?.kind || null;
-  const interactiveBody = interactive?.body || "";
-  const isInteractive = !!interactiveKind;
 
   return (
     <div className={`flex ${isOut ? "justify-end" : "justify-start"} animate-in fade-in slide-in-from-bottom-2 duration-300`}>
@@ -490,83 +353,15 @@ const MessageBubble: React.FC<MessageBubbleProps> = ({ msg, liveTime, isGroup })
           </div>
         )}
 
-        {msg.type === 'video' && (
-          <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-            <MessageSquare size={14} strokeWidth={2.5} /> Video
-          </div>
-        )}
-
-        {(msg.type === 'audio' || msg.type === 'voice_note') && (
-          <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-            <MessageSquare size={14} strokeWidth={2.5} /> {msg.type === "voice_note" ? "Voice Note" : "Audio"}
-          </div>
-        )}
-
-        {msg.type === 'sticker' && (
-          <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-            <ImageIcon size={14} strokeWidth={2.5} /> Sticker
-          </div>
-        )}
-
         {msg.type === 'location' && (
           <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
             <MapPin size={14} strokeWidth={2.5} /> Lokasi Geografis
           </div>
         )}
 
-        {isInteractive && (
-          <div className={`mb-2 text-[10px] font-bold uppercase tracking-wider inline-flex px-3 py-1.5 rounded-lg items-center gap-2 ${isOut ? 'bg-white/20 text-white' : 'bg-white border border-slate-200 text-slate-600'}`}>
-            <Layers size={14} strokeWidth={2.5} /> {`Interactive ${String(interactiveKind || "").replace("_", " ")}`}
-          </div>
-        )}
-
         <p className="text-[14px] md:text-[15px] leading-relaxed font-normal break-words whitespace-pre-wrap">
-          {interactiveBody || msg.text || (msg.type !== 'text' ? '[Isi Lampiran Media Berhasil Disampaikan]' : '')}
+          {msg.text || (msg.type !== 'text' ? '[Isi Lampiran Media Berhasil Disampaikan]' : '')}
         </p>
-
-        {isInteractive && interactiveKind && (
-          <div className="mt-2 space-y-1.5">
-            {(interactiveKind === "buttons" || interactiveKind === "quick_reply") && Array.isArray(interactive?.buttons) && interactive.buttons.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {interactive.buttons.slice(0, 3).map((btn, idx) => (
-                  <span key={`${btn}-${idx}`} className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${isOut ? "bg-white/20 text-white" : "bg-white border border-slate-300 text-[#0b57d0]"}`}>
-                    {btn}
-                  </span>
-                ))}
-              </div>
-            )}
-
-            {interactiveKind === "list" && Array.isArray(interactive?.sections) && interactive.sections.length > 0 && (
-              <div className={`rounded-xl p-2.5 text-[11px] ${isOut ? "bg-white/15 text-white/95" : "bg-white border border-slate-200 text-slate-600"}`}>
-                {(interactive.sections || []).slice(0, 1).map((section, sIdx) => (
-                  <div key={sIdx}>
-                    {section?.title && <div className="font-bold mb-1">{section.title}</div>}
-                    <div className="space-y-1">
-                      {(section?.rows || []).slice(0, 3).map((row, rIdx) => (
-                        <div key={rIdx} className="truncate">{row?.title || `Opsi ${rIdx + 1}`}</div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-
-            {interactiveKind === "cta" && (
-              <div className="flex flex-wrap gap-1.5">
-                {interactive?.ctaUrlLabel && (
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${isOut ? "bg-white/20 text-white" : "bg-white border border-slate-300 text-[#0b57d0]"}`}>
-                    {interactive.ctaUrlLabel}
-                  </span>
-                )}
-                {interactive?.ctaCallLabel && (
-                  <span className={`px-2.5 py-1 rounded-full text-[10px] font-bold ${isOut ? "bg-white/20 text-white" : "bg-white border border-slate-300 text-[#0b57d0]"}`}>
-                    {interactive.ctaCallLabel}
-                  </span>
-                )}
-              </div>
-            )}
-          </div>
-        )}
 
         <div className="text-[10px] mt-1.5 flex justify-end items-center gap-1.5 opacity-70 font-medium">
           {formatTime(msg.time)}
@@ -626,22 +421,10 @@ function InboxComponent() {
 
   const [peer, setPeer] = useState<string>("");
   const activePeerRef = useRef<string>("");
-  const readMarkAtRef = useRef<Map<string, number>>(new Map());
-  const readMarkTimerRef = useRef<Map<string, any>>(new Map());
-  const sseLastIdRef = useRef<number>(0);
-  const [convsReady, setConvsReady] = useState(false);
-  const [sseReconnectTick, setSseReconnectTick] = useState(0);
 
   useEffect(() => {
     activePeerRef.current = peer;
   }, [peer]);
-
-  useEffect(() => {
-    return () => {
-      for (const t of readMarkTimerRef.current.values()) clearTimeout(t);
-      readMarkTimerRef.current.clear();
-    };
-  }, []);
 
   const [messages, setMessages] = useState<MsgRow[]>([]);
   const [text, setText] = useState<string>("");
@@ -657,9 +440,8 @@ function InboxComponent() {
   const [hasMoreMsgs, setHasMoreMsgs] = useState<boolean>(true);
   const [loadingMore, setLoadingMore] = useState<boolean>(false);
 
-  const [mediaModal, setMediaModal] = useState<{ open: boolean; type: 'image' | 'video' | 'audio' | 'voice_note' | 'document' | 'sticker' | 'location'; }>({ open: false, type: 'image' });
-  const [mediaPayload, setMediaPayload] = useState({ caption: "", lat: "", lng: "", name: "", address: "" });
-  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [mediaModal, setMediaModal] = useState<{ open: boolean; type: 'image' | 'document' | 'location'; }>({ open: false, type: 'image' });
+  const [mediaPayload, setMediaPayload] = useState({ url: "", caption: "", lat: "", lng: "" });
   const [bcModal, setBcModal] = useState<{ open: boolean; targets: string[]; }>({ open: false, targets: [] });
   const [bcPayload, setBcPayload] = useState({ text: "", delay: "2000" });
   const [labelModal, setLabelModal] = useState<{ open: boolean; targets: string[]; }>({ open: false, targets: [] });
@@ -667,76 +449,11 @@ function InboxComponent() {
   const [fuModal, setFuModal] = useState<{ open: boolean; targets: string[]; }>({ open: false, targets: [] });
   const [fuPayload, setFuPayload] = useState({ campaignId: "" });
   const [campaigns, setCampaigns] = useState<any[]>([]);
-  const [interactiveModal, setInteractiveModal] = useState<{ open: boolean; target: string }>({ open: false, target: "" });
-  const [interactivePayload, setInteractivePayload] = useState<InteractivePayloadState>(INITIAL_INTERACTIVE_PAYLOAD);
-  const [interactiveTemplates, setInteractiveTemplates] = useState<TemplateRow[]>([]);
-  const [interactiveLoadingTemplates, setInteractiveLoadingTemplates] = useState(false);
-  const [interactiveError, setInteractiveError] = useState<string | null>(null);
 
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const [isAtBottom, setIsAtBottom] = useState<boolean>(true);
 
   const peerNumber = useMemo(() => String(peer || "").includes("@") ? String(peer || "").split("@")[0] : peer, [peer]);
-  const selectedInteractiveTemplate = useMemo(
-    () => interactiveTemplates.find(t => Number(t.id) === Number(interactivePayload.templateId || 0)) || null,
-    [interactiveTemplates, interactivePayload.templateId]
-  );
-  const interactiveButtons = useMemo(
-    () => interactivePayload.buttonsText
-      .split(/\r?\n|,/g)
-      .map(v => v.trim())
-      .filter(Boolean)
-      .slice(0, 3),
-    [interactivePayload.buttonsText]
-  );
-  const interactiveListRows = useMemo(
-    () => interactivePayload.listRowsText
-      .split(/\r?\n/g)
-      .map(v => v.trim())
-      .filter(Boolean)
-      .slice(0, 10)
-      .map((line, idx) => {
-        const [rowTitle, rowDesc] = line.split("|");
-        const baseRow = String(rowTitle || "").trim().toLowerCase().replace(/[^a-z0-9]+/g, "_") || `pilihan_${idx + 1}`;
-        return {
-          title: String(rowTitle || "").trim() || `Pilihan ${idx + 1}`,
-          description: String(rowDesc || "").trim() || undefined,
-          rowId: `ui_row_${baseRow}_${idx}`
-        };
-      }),
-    [interactivePayload.listRowsText]
-  );
-  const interactiveValidationMessage = useMemo(() => {
-    const kind = interactivePayload.kind;
-    const body = interactivePayload.body.trim();
-
-    if (kind === "template") {
-      if (!body && !interactivePayload.templateId) return "Pilih template atau isi body.";
-      return "";
-    }
-
-    if (!body) return "Body pesan wajib diisi.";
-
-    if ((kind === "buttons" || kind === "quick_reply") && interactiveButtons.length === 0) {
-      return "Tambahkan minimal 1 tombol.";
-    }
-    if ((kind === "buttons" || kind === "quick_reply") && interactiveButtons.length > 3) {
-      return "Maksimal 3 tombol untuk satu pesan interactive.";
-    }
-
-    if (kind === "list" && interactiveListRows.length === 0) {
-      return "Tambahkan minimal 1 baris list.";
-    }
-
-    if (kind === "cta") {
-      const hasUrl = !!interactivePayload.ctaUrl.trim() && !!interactivePayload.ctaUrlLabel.trim();
-      const hasCall = !!interactivePayload.ctaCallNumber.trim() && !!interactivePayload.ctaCallLabel.trim();
-      if (!hasUrl && !hasCall) return "Isi minimal satu CTA URL atau Call.";
-    }
-
-    return "";
-  }, [interactivePayload, interactiveButtons.length, interactiveListRows.length]);
-  const interactiveReady = interactiveValidationMessage === "";
 
   const filteredConvs = useMemo(() => {
     let result = [...convs];
@@ -789,44 +506,6 @@ function InboxComponent() {
       setTimeout(() => scrollToBottom("smooth"), 100);
     }
   }, [messages, isAtBottom, scrollToBottom]);
-
-  useEffect(() => {
-    if (!interactiveError) return;
-    setInteractiveError(null);
-  }, [interactivePayload]);
-
-  const requestMarkRead = useCallback(async (sk: string, jid: string, force = false) => {
-    const key = `${sk}:${jid}`;
-    const now = Date.now();
-    const last = readMarkAtRef.current.get(key) || 0;
-    const throttleMs = 800;
-    if (!force && now - last < throttleMs) {
-      if (!readMarkTimerRef.current.get(key)) {
-        const remain = throttleMs - (now - last);
-        const timer = setTimeout(() => {
-          readMarkTimerRef.current.delete(key);
-          requestMarkRead(sk, jid, true);
-        }, Math.max(60, remain + 20));
-        readMarkTimerRef.current.set(key, timer);
-      }
-      return;
-    }
-    readMarkAtRef.current.set(key, now);
-    await apiFetch("/ui/conversations/read", {
-      method: "POST",
-      body: JSON.stringify({ sessionKey: sk, peer: jid })
-    }).catch(() => {
-      const existing = readMarkTimerRef.current.get(key);
-      if (!existing) {
-        const timer = setTimeout(() => {
-          readMarkTimerRef.current.delete(key);
-          requestMarkRead(sk, jid, true);
-        }, 1200);
-        readMarkTimerRef.current.set(key, timer);
-      }
-    });
-  }, []);
-
   useEffect(() => {
     const active = String(peer || "");
     if (!active) return;
@@ -841,17 +520,31 @@ function InboxComponent() {
     if (isSelectionMode) {
       togglePeerSelection(jid);
     } else {
-      activePeerRef.current = String(jid || "");
-      setPeer(String(jid || ""));
+      setPeer(jid);
       activePeerRef.current = String(jid || "");
       setConvs(prev => prev.map(c => String(c?.peer || c?.remoteJid || "") === String(jid || "") ? { ...c, unreadCount: 0 } : c));
       setHasMoreMsgs(true);
       setAttachOpen(false);
       setMessages([]);
       setTimeout(() => { scrollToBottom("auto"); setIsAtBottom(true); }, 100);
-      requestMarkRead(sessionKey, String(jid || ""));
+      apiFetch("/ui/conversations/read", { method: "POST", body: JSON.stringify({ sessionKey, peer: String(jid || "") }) }).then(() => loadConvs(sessionKey)).catch(() => { });
     }
   };
+
+  useEffect(() => {
+    const active = String(peer || "");
+    if (!active) return;
+
+    setConvs(prev => prev.map(c => {
+      const jid = String(c?.peer || c?.remoteJid || "");
+      return jid === active ? { ...c, unreadCount: 0 } : c;
+    }));
+  }, [peer]);
+
+  useEffect(() => {
+    if (!sessionKey || !peer) return;
+    loadConvs(sessionKey).catch(() => { });
+  }, [peer, sessionKey, loadConvs]);
 
   const loadLeads = async () => {
     try {
@@ -868,24 +561,6 @@ function InboxComponent() {
     } catch (e) { }
   };
 
-  const loadInteractiveTemplates = useCallback(async (force = false) => {
-    if (!force && interactiveTemplates.length > 0) return;
-    setInteractiveLoadingTemplates(true);
-    try {
-      const res = await apiFetch<{ ok: true; data: TemplateRow[] }>("/templates");
-      const textTemplates = (res.data || []).filter(t => String(t?.message_type || "text") === "text");
-      setInteractiveTemplates(textTemplates);
-      setInteractivePayload(prev => {
-        if (prev.templateId || textTemplates.length === 0) return prev;
-        return { ...prev, templateId: String(textTemplates[0].id) };
-      });
-    } catch {
-      // ignore load failure to keep inbox usable
-    } finally {
-      setInteractiveLoadingTemplates(false);
-    }
-  }, [interactiveTemplates.length]);
-
   const loadSessions = async () => {
     try {
       const res = await apiFetch<{ ok: true; sessions: any[] }>("/ui/sessions");
@@ -899,13 +574,10 @@ function InboxComponent() {
     try {
       const res = await apiFetch<{ ok: true; conversations: ConvRow[] }>(`/ui/conversations?sessionKey=${encodeURIComponent(sk)}`);
       const deduped = dedupeByPeer(res.conversations || []);
-      const maxConvId = deduped.reduce((mx, c) => Math.max(mx, Number(c?.lastMessage?.id || 0)), 0);
-      sseLastIdRef.current = Math.max(sseLastIdRef.current, maxConvId);
       setConvs(deduped.map(c => {
         if (String(c?.peer || c?.remoteJid || "") === String(activePeerRef.current || "")) return { ...c, unreadCount: 0 };
         return c;
       }));
-      setConvsReady(true);
     } catch (e: any) { setErr(e.message); }
   }, []);
 
@@ -913,9 +585,13 @@ function InboxComponent() {
     try {
       const url = `/ui/messages?sessionKey=${encodeURIComponent(sk)}&peer=${encodeURIComponent(p)}&limit=30${cursor ? `&cursor=${cursor}` : ''}`;
       const res = await apiFetch<{ ok: true; peer: string; messages: MsgRow[], nextCursor?: string }>(url);
-      const maxMsgId = (res.messages || []).reduce((mx, m) => Math.max(mx, Number(m?.id || 0)), 0);
-      sseLastIdRef.current = Math.max(sseLastIdRef.current, maxMsgId);
-      setMessages(prev => mergeAndDedupeMessages(prev, res.messages || [], cursor ? "prepend" : "replace"));
+      setMessages(prev => {
+        const newMsgs = res.messages || [];
+        if (cursor) {
+          return [...newMsgs, ...prev]; // Prepend older messages
+        }
+        return newMsgs; // Initial load
+      });
       setHasMoreMsgs(!!res.nextCursor && (res.messages || []).length > 0);
     } catch (e: any) { setErr(e.message); }
   }, []);
@@ -925,8 +601,6 @@ function InboxComponent() {
   // Initial Data Load (Conversations)
   useEffect(() => {
     if (!sessionKey) return;
-    setConvsReady(false);
-    sseLastIdRef.current = 0;
     loadConvs(sessionKey);
   }, [sessionKey, loadConvs]);
 
@@ -934,40 +608,37 @@ function InboxComponent() {
   useEffect(() => {
     if (!sessionKey || !peer) return;
     loadMessages(sessionKey, peer);
-    requestMarkRead(sessionKey, peer, true);
-  }, [sessionKey, peer, loadMessages, requestMarkRead]);
+  }, [sessionKey, peer, loadMessages]);
 
   // SSE (Server-Sent Events) Setup
   useEffect(() => {
-    if (!sessionKey || !convsReady) return;
+    if (!sessionKey) return;
 
-    const sinceId = Math.max(0, Number(sseLastIdRef.current || 0));
-    const sse = new EventSource(`/api/ui/stream?sessionKey=${encodeURIComponent(sessionKey)}&sinceId=${sinceId}`);
+    // Connect to SSE stream
+    const sse = new EventSource(`/api/ui/stream?sessionKey=${encodeURIComponent(sessionKey)}`);
 
     sse.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         if (data && data.id) {
-          const incomingId = Number(data.id || 0);
-          if (incomingId > 0 && incomingId <= Number(sseLastIdRef.current || 0)) {
-            return;
-          }
-          sseLastIdRef.current = Math.max(Number(sseLastIdRef.current || 0), incomingId);
-
           // 1. Update Messages if looking at this peer
           if (data.peer === activePeerRef.current) {
             setMessages(prev => {
+              // Prevent duplicates
+              if (prev.find(m => m.id === data.id)) return prev;
               const newMsg = {
-                waMessageId: data.waMessageId || null,
                 id: data.id, direction: data.direction, type: data.type,
                 text: data.text, media: data.mediaUrl ? { url: data.mediaUrl } : null,
-                interactive: data.interactive || null,
                 location: null, status: data.status, error: null, time: data.time
               };
+              // Persistently mark as read if we are looking at this chat and it's an incoming message
               if (data.direction === 'in' && String(data?.peer || "") === String(activePeerRef.current || "")) {
-                requestMarkRead(sessionKey, String(data?.peer || ""));
+                apiFetch("/ui/conversations/read", {
+                  method: "POST",
+                  body: JSON.stringify({ sessionKey, peer: String(data?.peer || "") })
+                }).then(() => loadConvs(sessionKey)).catch(() => { });
               }
-              return mergeAndDedupeMessages(prev, [newMsg as MsgRow], "append");
+              return [...prev, newMsg];
             });
             setTimeout(() => scrollToBottom("smooth"), 100);
           }
@@ -979,11 +650,6 @@ function InboxComponent() {
 
             let updatedConv: ConvRow;
             if (existingIdx >= 0) {
-              const currentLastId = Number(prev[existingIdx]?.lastMessage?.id || 0);
-              const incomingIdNum = Number(data?.id || 0);
-              if (incomingIdNum <= currentLastId) {
-                return prev;
-              }
               updatedConv = {
                 ...prev[existingIdx],
                 unreadCount: String(data?.peer || "") === String(activePeerRef.current || "") ? 0 : (isUnread ? prev[existingIdx].unreadCount + 1 : prev[existingIdx].unreadCount),
@@ -1012,25 +678,10 @@ function InboxComponent() {
       } catch (e) { }
     };
 
-    sse.onerror = () => {
-      sse.close();
-      setTimeout(() => setSseReconnectTick((x) => x + 1), 1500);
-    };
-
     return () => {
       sse.close();
     };
-  }, [sessionKey, convsReady, scrollToBottom, requestMarkRead, sseReconnectTick]);
-
-  // Poll ringan sebagai fallback sinkronisasi bila SSE putus atau idle lama.
-  useEffect(() => {
-    if (!sessionKey) return;
-    const interval = setInterval(() => {
-      if (typeof document !== "undefined" && document.hidden) return;
-      loadConvs(sessionKey);
-    }, 25000);
-    return () => clearInterval(interval);
-  }, [sessionKey, loadConvs]);
+  }, [sessionKey, scrollToBottom]);
 
   async function sendText() {
     if (!text.trim() || sending) return;
@@ -1145,184 +796,16 @@ function InboxComponent() {
     setSending(true);
     try {
       const isLoc = mediaModal.type === 'location';
-      if (isLoc) {
-        const payload = {
-          sessionKey,
-          to: peer,
-          latitude: Number(mediaPayload.lat),
-          longitude: Number(mediaPayload.lng),
-          name: mediaPayload.name || undefined,
-          address: mediaPayload.address || undefined
-        };
-        await apiFetch('/messages/send-location', { method: "POST", body: JSON.stringify(payload) });
-      } else {
-        if (!mediaFile) throw new Error("Pilih file media terlebih dahulu.");
-        const body = new FormData();
-        body.append("sessionKey", sessionKey);
-        body.append("to", peer);
-        body.append("type", mediaModal.type);
-        if (mediaPayload.caption.trim()) body.append("caption", mediaPayload.caption.trim());
-        body.append("file", mediaFile);
-        await apiFetch('/messages/send-media', { method: "POST", body });
-      }
-      setMediaModal({ open: false, type: 'image' });
-      setMediaPayload({ caption: "", lat: "", lng: "", name: "", address: "" });
-      setMediaFile(null);
+      const payload = isLoc ? { sessionKey, to: peer, latitude: Number(mediaPayload.lat), longitude: Number(mediaPayload.lng) } : { sessionKey, to: peer, type: mediaModal.type, url: mediaPayload.url, caption: mediaPayload.caption };
+      const endpoint = isLoc ? '/messages/send-location' : '/messages/send-media';
+      await apiFetch(endpoint, { method: "POST", body: JSON.stringify(payload) });
+      setMediaModal({ open: false, type: 'image' }); setMediaPayload({ url: "", caption: "", lat: "", lng: "" });
       // SSE handles new message
     } catch (e: any) { alert("Kesalahan Transmisi Media: " + e.message); } finally { setSending(false); }
   }
 
-  function useCurrentDeviceLocation() {
-    if (!navigator.geolocation) {
-      alert("Browser ini tidak mendukung geolocation.");
-      return;
-    }
-    navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const lat = String(pos.coords.latitude);
-        const lng = String(pos.coords.longitude);
-        setMediaPayload(prev => ({ ...prev, lat, lng, name: prev.name || "Lokasi Saat Ini" }));
-        try {
-          window.open(`https://www.google.com/maps?q=${lat},${lng}`, "_blank", "noopener,noreferrer");
-        } catch {
-          // ignore
-        }
-      },
-      (err) => {
-        alert(`Gagal mengambil lokasi perangkat: ${err.message}`);
-      },
-      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
-    );
-  }
-
-  const setInteractiveKind = useCallback((kind: InteractiveKind) => {
-    setInteractiveError(null);
-    setInteractivePayload(prev => ({ ...prev, kind }));
-  }, []);
-
-  const resetInteractiveComposer = useCallback(() => {
-    setInteractiveError(null);
-    setInteractivePayload(INITIAL_INTERACTIVE_PAYLOAD);
-  }, []);
-
-  const fillInteractiveSample = useCallback(() => {
-    setInteractiveError(null);
-    setInteractivePayload(prev => {
-      if (prev.kind === "buttons") {
-        return {
-          ...prev,
-          body: prev.body || "Silakan pilih konfirmasi Anda:",
-          footer: prev.footer || "Tim CS siap membantu",
-          buttonsText: "Lanjut\nNanti"
-        };
-      }
-      if (prev.kind === "quick_reply") {
-        return {
-          ...prev,
-          body: prev.body || "Pilih jawaban cepat di bawah ini:",
-          footer: prev.footer || "Balas cepat",
-          buttonsText: "Ya, lanjut\nButuh info dulu"
-        };
-      }
-      if (prev.kind === "list") {
-        return {
-          ...prev,
-          title: prev.title || "Menu Layanan",
-          body: prev.body || "Pilih layanan yang Anda butuhkan:",
-          buttonText: prev.buttonText || "Lihat Menu",
-          listSectionTitle: prev.listSectionTitle || "Pilihan Utama",
-          listRowsText: prev.listRowsText || "Paket Basic|Mulai 99rb\nPaket Pro|Mulai 299rb"
-        };
-      }
-      if (prev.kind === "cta") {
-        return {
-          ...prev,
-          body: prev.body || "Hubungi kami lewat tombol berikut:",
-          ctaUrlLabel: prev.ctaUrlLabel || "Kunjungi Website",
-          ctaUrl: prev.ctaUrl || "https://example.com",
-          ctaCallLabel: prev.ctaCallLabel || "Telepon Admin",
-          ctaCallNumber: prev.ctaCallNumber || "+628123456789"
-        };
-      }
-      return {
-        ...prev,
-        body: prev.body || (selectedInteractiveTemplate?.text_body ? String(selectedInteractiveTemplate.text_body) : "Pesan template siap kirim.")
-      };
-    });
-  }, [selectedInteractiveTemplate]);
-
-  const openInteractiveComposer = useCallback(() => {
-    if (!peer) return;
-    setAttachOpen(false);
-    setInteractiveError(null);
-    setInteractiveModal({ open: true, target: peer });
-    loadInteractiveTemplates();
-  }, [peer, loadInteractiveTemplates]);
-
-  async function executeSendInteractive() {
-    if (sending || !interactiveModal.target) return;
-    setInteractiveError(null);
-
-    const kind = interactivePayload.kind;
-    const body = interactivePayload.body.trim();
-    const footer = interactivePayload.footer.trim();
-    const title = interactivePayload.title.trim();
-
-    if (!interactiveReady) {
-      setInteractiveError(interactiveValidationMessage || "Form interactive belum lengkap.");
-      return;
-    }
-
-    const payload: any = {
-      sessionKey,
-      to: interactiveModal.target,
-      kind,
-      body,
-      footer,
-      title
-    };
-
-    if (kind === "buttons" || kind === "quick_reply") {
-      payload.buttons = interactiveButtons;
-    } else if (kind === "list") {
-      const buttonText = interactivePayload.buttonText.trim() || "Pilih";
-      payload.buttonText = buttonText;
-      payload.sections = [{ title: interactivePayload.listSectionTitle.trim() || "Pilihan", rows: interactiveListRows }];
-    } else if (kind === "cta") {
-      payload.ctaUrlLabel = interactivePayload.ctaUrlLabel.trim();
-      payload.ctaUrl = interactivePayload.ctaUrl.trim();
-      payload.ctaCallLabel = interactivePayload.ctaCallLabel.trim();
-      payload.ctaCallNumber = interactivePayload.ctaCallNumber.trim();
-    } else if (kind === "template") {
-      const templateId = Number(interactivePayload.templateId || 0);
-      if (!body && selectedInteractiveTemplate?.text_body) {
-        payload.body = String(selectedInteractiveTemplate.text_body || "").trim();
-      }
-      if (templateId) payload.templateId = templateId;
-    }
-
-    setSending(true);
-    try {
-      const out = await apiFetch<{ ok?: boolean; error?: string }>("/messages/send-interactive", {
-        method: "POST",
-        body: JSON.stringify(payload)
-      });
-      if (out && out.ok === false) {
-        throw new Error(out.error || "Pengiriman interactive gagal.");
-      }
-      setInteractiveModal({ open: false, target: "" });
-      setInteractivePayload(INITIAL_INTERACTIVE_PAYLOAD);
-      setInteractiveError(null);
-      scrollToBottom("smooth");
-    } catch (e: any) {
-      setInteractiveError("Gagal kirim interactive: " + e.message);
-    } finally {
-      setSending(false);
-    }
-  }
-
   const currentConv = convs.find(c => c.peer === peer);
-  const currentLead = leads.find(l => normalizePhoneDigits(l.to_number) === normalizePhoneDigits(peerNumber));
+  const currentLead = leads.find(l => l.to_number === peerNumber);
   const currentLabel = customLabels[peerNumber];
 
   if (isAppLoading) {
@@ -1382,14 +865,13 @@ function InboxComponent() {
           {filteredConvs.map((c, idx) => {
             const convJid = String(c?.remoteJid || c?.peer || "");
             const cNum = convJid.split("@")[0];
-            const activeJid = String(activePeerRef.current || peer || "");
-            const isActive = activeJid === String(convJid || "") && !isSelectionMode;
+            const isActive = String(peer || "") === String(convJid || "") && !isSelectionMode;
             const isSelected = selectedPeers.includes(convJid);
-            const isLead = leads.find(l => normalizePhoneDigits(l.to_number) === normalizePhoneDigits(cNum));
+            const isLead = leads.find(l => l.to_number === cNum);
             const lLabel = customLabels[cNum];
             const isGroup = convJid.includes('@g.us');
             const contactDisplayName = formatContactName(convJid, c?.name);
-            const displayUnreadCount = activeJid === String(convJid || "") ? 0 : Number(c?.unreadCount || 0);
+            const displayUnreadCount = isActive ? 0 : Number(c?.unreadCount || 0);
             const isUnread = displayUnreadCount > 0;
             const isOutMsg = c.lastMessage?.direction === 'out';
             const groupSenderPrefix = isGroup && !isOutMsg && c.lastMessage?.pushName ? `${c.lastMessage.pushName}: ` : '';
@@ -1519,12 +1001,7 @@ function InboxComponent() {
               <div className="absolute bottom-[100%] left-4 md:left-6 mb-2 bg-white border border-slate-100 p-2 rounded-2xl shadow-lg flex flex-col gap-1 z-50 animate-in slide-in-from-bottom-2 min-w-[200px]">
                 <button onClick={() => { setMediaModal({ open: true, type: 'document' }); setAttachOpen(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><FileText size={18} className="text-[#0b57d0]" /> Kirim Dokumen</button>
                 <button onClick={() => { setMediaModal({ open: true, type: 'image' }); setAttachOpen(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><ImageIcon size={18} className="text-[#0b57d0]" /> Kirim Gambar</button>
-                <button onClick={() => { setMediaModal({ open: true, type: 'video' }); setAttachOpen(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><MessageSquare size={18} className="text-[#0b57d0]" /> Kirim Video</button>
-                <button onClick={() => { setMediaModal({ open: true, type: 'audio' }); setAttachOpen(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><MessageSquare size={18} className="text-[#0b57d0]" /> Kirim Audio</button>
-                <button onClick={() => { setMediaModal({ open: true, type: 'voice_note' }); setAttachOpen(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><MessageSquare size={18} className="text-[#0b57d0]" /> Kirim Voice Note</button>
-                <button onClick={() => { setMediaModal({ open: true, type: 'sticker' }); setAttachOpen(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><ImageIcon size={18} className="text-[#0b57d0]" /> Kirim Sticker</button>
                 <button onClick={() => { setMediaModal({ open: true, type: 'location' }); setAttachOpen(false); }} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><MapPin size={18} className="text-[#0b57d0]" /> Kirim Lokasi</button>
-                <button onClick={openInteractiveComposer} className="flex items-center gap-3 px-4 py-3 hover:bg-[#f0f4f9] rounded-xl text-slate-700 font-medium text-sm w-full text-left transition-colors"><Layers size={18} className="text-[#0b57d0]" /> Pesan Interaktif</button>
               </div>
             )}
             <div className="flex items-end gap-2 md:gap-3 bg-[#f0f4f9] p-1.5 md:p-2 rounded-3xl transition-all">
@@ -1588,281 +1065,6 @@ function InboxComponent() {
         </div>
       )}
 
-      {interactiveModal.open && (
-        <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 bg-slate-900/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-xl bg-white rounded-3xl p-6 shadow-xl animate-in zoom-in-95 duration-200 max-h-[92vh] overflow-y-auto">
-            <div className="flex items-start justify-between gap-3 mb-4">
-              <div>
-                <h3 className="text-xl font-bold text-slate-800 flex items-center gap-2">
-                  <Layers size={20} className="text-[#0b57d0]" /> Interactive Message
-                </h3>
-                <p className="text-xs text-slate-500 mt-1">
-                  Target: {formatContactName(interactiveModal.target, currentConv?.name)}
-                </p>
-              </div>
-              <button
-                onClick={() => { setInteractiveModal({ open: false, target: "" }); setInteractiveError(null); }}
-                className="w-9 h-9 rounded-full border border-slate-200 text-slate-500 hover:bg-slate-50 flex items-center justify-center"
-                aria-label="Tutup"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
-              <p className="text-[12px] font-medium text-slate-500">
-                {INTERACTIVE_KIND_META[interactivePayload.kind].hint}
-              </p>
-              <div className="flex gap-2">
-                <button
-                  type="button"
-                  onClick={fillInteractiveSample}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
-                >
-                  Isi Contoh
-                </button>
-                <button
-                  type="button"
-                  onClick={resetInteractiveComposer}
-                  className="px-3 py-1.5 rounded-lg border border-slate-200 text-[11px] font-bold text-slate-600 hover:bg-slate-50"
-                >
-                  Reset
-                </button>
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 mb-4">
-              {[
-                { value: "buttons", label: "Buttons" },
-                { value: "quick_reply", label: "Quick Reply" },
-                { value: "list", label: "List" },
-                { value: "template", label: "Template" },
-                { value: "cta", label: "CTA" }
-              ].map(opt => (
-                <button
-                  key={opt.value}
-                  onClick={() => setInteractiveKind(opt.value as InteractiveKind)}
-                  className={`px-3 py-2 rounded-xl text-xs font-bold transition-colors border ${interactivePayload.kind === opt.value ? "bg-[#0b57d0] text-white border-[#0b57d0]" : "bg-white text-slate-600 border-slate-200 hover:bg-slate-50"}`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-
-            <div className="space-y-3">
-              {interactivePayload.kind === "template" && (
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Template</label>
-                  <div className="flex gap-2">
-                    <select
-                      value={interactivePayload.templateId}
-                      onChange={(e) => setInteractivePayload(prev => ({ ...prev, templateId: e.target.value }))}
-                      className="flex-1 px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700"
-                    >
-                      <option value="">Pilih template text...</option>
-                      {interactiveTemplates.map(t => (
-                        <option key={t.id} value={String(t.id)}>
-                          {t.name}
-                        </option>
-                      ))}
-                    </select>
-                    <button
-                      onClick={() => loadInteractiveTemplates(true)}
-                      disabled={interactiveLoadingTemplates}
-                      className="px-3 rounded-xl border border-slate-200 text-xs font-bold text-slate-600 hover:bg-slate-50 disabled:opacity-60"
-                    >
-                      {interactiveLoadingTemplates ? "..." : "Refresh"}
-                    </button>
-                  </div>
-                  {selectedInteractiveTemplate?.text_body && (
-                    <div className="mt-2 flex items-center justify-between gap-2 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                      <p className="text-[11px] text-slate-600 truncate">
-                        Preview: {String(selectedInteractiveTemplate.text_body || "").slice(0, 80)}
-                      </p>
-                      <button
-                        type="button"
-                        onClick={() => setInteractivePayload(prev => ({ ...prev, body: String(selectedInteractiveTemplate.text_body || "") }))}
-                        className="shrink-0 text-[11px] font-bold text-[#0b57d0] hover:underline"
-                      >
-                        Gunakan
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Body</label>
-                <textarea
-                  rows={3}
-                  value={interactivePayload.body}
-                  onChange={(e) => setInteractivePayload(prev => ({ ...prev, body: e.target.value }))}
-                  placeholder={interactivePayload.kind === "template" ? "Opsional jika pakai template..." : "Isi pesan utama..."}
-                  className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 resize-y focus:ring-2 focus:ring-[#c2e7ff]"
-                />
-              </div>
-
-              {interactivePayload.kind !== "template" && (
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Footer (opsional)</label>
-                  <input
-                    value={interactivePayload.footer}
-                    onChange={(e) => setInteractivePayload(prev => ({ ...prev, footer: e.target.value }))}
-                    placeholder="Tambahkan footer..."
-                    className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                  />
-                </div>
-              )}
-
-              {(interactivePayload.kind === "buttons" || interactivePayload.kind === "quick_reply") && (
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Button Label (1 baris = 1 button, max 3)</label>
-                  <textarea
-                    rows={3}
-                    value={interactivePayload.buttonsText}
-                    onChange={(e) => setInteractivePayload(prev => ({ ...prev, buttonsText: e.target.value }))}
-                    placeholder={"Ya\nTidak\nNanti"}
-                    className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 resize-y focus:ring-2 focus:ring-[#c2e7ff]"
-                  />
-                </div>
-              )}
-
-              {interactivePayload.kind === "list" && (
-                <>
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Judul (opsional)</label>
-                      <input
-                        value={interactivePayload.title}
-                        onChange={(e) => setInteractivePayload(prev => ({ ...prev, title: e.target.value }))}
-                        placeholder="Menu layanan"
-                        className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Teks Tombol</label>
-                      <input
-                        value={interactivePayload.buttonText}
-                        onChange={(e) => setInteractivePayload(prev => ({ ...prev, buttonText: e.target.value }))}
-                        placeholder="Pilih menu"
-                        className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Judul Section</label>
-                    <input
-                      value={interactivePayload.listSectionTitle}
-                      onChange={(e) => setInteractivePayload(prev => ({ ...prev, listSectionTitle: e.target.value }))}
-                      placeholder="Pilihan"
-                      className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                    />
-                  </div>
-                  <div>
-                    <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Rows (1 baris = title|description)</label>
-                    <textarea
-                      rows={4}
-                      value={interactivePayload.listRowsText}
-                      onChange={(e) => setInteractivePayload(prev => ({ ...prev, listRowsText: e.target.value }))}
-                      placeholder={"Paket Hemat|Mulai dari 99rb\nPaket Premium|Mulai dari 299rb"}
-                      className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 resize-y focus:ring-2 focus:ring-[#c2e7ff]"
-                    />
-                  </div>
-                </>
-              )}
-
-              {interactivePayload.kind === "cta" && (
-                <>
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Label URL</label>
-                      <input
-                        value={interactivePayload.ctaUrlLabel}
-                        onChange={(e) => setInteractivePayload(prev => ({ ...prev, ctaUrlLabel: e.target.value }))}
-                        placeholder="Buka Website"
-                        className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">URL</label>
-                      <input
-                        value={interactivePayload.ctaUrl}
-                        onChange={(e) => setInteractivePayload(prev => ({ ...prev, ctaUrl: e.target.value }))}
-                        placeholder="https://..."
-                        className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid sm:grid-cols-2 gap-3">
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Label Call</label>
-                      <input
-                        value={interactivePayload.ctaCallLabel}
-                        onChange={(e) => setInteractivePayload(prev => ({ ...prev, ctaCallLabel: e.target.value }))}
-                        placeholder="Telepon"
-                        className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wide mb-1.5">Nomor Call</label>
-                      <input
-                        value={interactivePayload.ctaCallNumber}
-                        onChange={(e) => setInteractivePayload(prev => ({ ...prev, ctaCallNumber: e.target.value }))}
-                        placeholder="+628xxxxxxxxxx"
-                        className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
-                      />
-                    </div>
-                  </div>
-                </>
-              )}
-            </div>
-
-            <div className="mt-4 rounded-xl border border-slate-200 bg-slate-50 p-3">
-              <div className="flex flex-wrap items-center gap-2 text-[11px] font-medium text-slate-600">
-                <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200">
-                  Tipe: {INTERACTIVE_KIND_META[interactivePayload.kind].label}
-                </span>
-                <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200">
-                  Body: {interactivePayload.body.trim() ? "Siap" : "Kosong"}
-                </span>
-                {(interactivePayload.kind === "buttons" || interactivePayload.kind === "quick_reply") && (
-                  <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200">Tombol: {interactiveButtons.length}</span>
-                )}
-                {interactivePayload.kind === "list" && (
-                  <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200">Rows: {interactiveListRows.length}</span>
-                )}
-                {interactivePayload.kind === "template" && (
-                  <span className="px-2 py-0.5 rounded-full bg-white border border-slate-200">Template: {interactivePayload.templateId ? "Dipilih" : "Manual"}</span>
-                )}
-              </div>
-            </div>
-
-            {(interactiveError || interactiveValidationMessage) && (
-              <div className={`mt-3 rounded-xl px-3 py-2 text-[12px] font-medium ${interactiveError ? "bg-rose-50 text-rose-600 border border-rose-100" : "bg-amber-50 text-amber-700 border border-amber-100"}`}>
-                {interactiveError || interactiveValidationMessage}
-              </div>
-            )}
-
-            <div className="flex justify-end gap-2 mt-6">
-              <button
-                onClick={() => { setInteractiveModal({ open: false, target: "" }); setInteractiveError(null); }}
-                className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] transition-colors text-sm"
-              >
-                Batal
-              </button>
-              <button
-                onClick={executeSendInteractive}
-                disabled={sending || !interactiveReady}
-                className="px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] disabled:bg-slate-300 transition-colors text-sm inline-flex items-center gap-2"
-              >
-                {sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
-                Kirim Interactive
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
       {mediaModal.open && (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in duration-200">
           <div className="w-full max-w-sm bg-white rounded-3xl p-6 shadow-xl animate-in zoom-in-95 duration-200">
@@ -1871,31 +1073,14 @@ function InboxComponent() {
               <div className="space-y-3 mb-6">
                 <input value={mediaPayload.lat} onChange={(e) => setMediaPayload({ ...mediaPayload, lat: e.target.value })} placeholder="Latitude" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
                 <input value={mediaPayload.lng} onChange={(e) => setMediaPayload({ ...mediaPayload, lng: e.target.value })} placeholder="Longitude" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
-                <input value={mediaPayload.name} onChange={(e) => setMediaPayload({ ...mediaPayload, name: e.target.value })} placeholder="Nama Lokasi (opsional)" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
-                <input value={mediaPayload.address} onChange={(e) => setMediaPayload({ ...mediaPayload, address: e.target.value })} placeholder="Alamat (opsional)" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
-                <button onClick={useCurrentDeviceLocation} className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-[#0b57d0] hover:bg-[#f0f4f9]">Gunakan Lokasi Perangkat & Buka Maps</button>
               </div>
             ) : (
               <div className="space-y-3 mb-6">
-                <label className="block w-full border-2 border-dashed border-slate-300 rounded-xl px-4 py-5 text-center text-sm font-medium text-slate-600 cursor-pointer hover:bg-[#f0f4f9]">
-                  <input
-                    type="file"
-                    className="hidden"
-                    accept={
-                      mediaModal.type === "image" ? "image/*" :
-                      mediaModal.type === "video" ? "video/*" :
-                      mediaModal.type === "audio" || mediaModal.type === "voice_note" ? "audio/*" :
-                      mediaModal.type === "sticker" ? ".webp,image/webp" :
-                      "*/*"
-                    }
-                    onChange={(e) => setMediaFile(e.target.files?.[0] || null)}
-                  />
-                  {mediaFile ? `File: ${mediaFile.name}` : `Pilih file ${mediaModal.type.replace("_", " ")}`}
-                </label>
+                <input value={mediaPayload.url} onChange={(e) => setMediaPayload({ ...mediaPayload, url: e.target.value })} placeholder="URL Lampiran Publik" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
                 <input value={mediaPayload.caption} onChange={(e) => setMediaPayload({ ...mediaPayload, caption: e.target.value })} placeholder="Keterangan (Opsional)" className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]" />
               </div>
             )}
-            <div className="flex gap-2 justify-end"><button onClick={() => { setMediaModal({ open: false, type: 'image' }); setMediaFile(null); setMediaPayload({ caption: "", lat: "", lng: "", name: "", address: "" }); }} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] transition-colors text-sm">Batal</button><button onClick={executeSendMedia} disabled={sending} className="px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] disabled:bg-slate-300 transition-colors text-sm flex items-center gap-2">{sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Kirim</button></div>
+            <div className="flex gap-2 justify-end"><button onClick={() => setMediaModal({ open: false, type: 'image' })} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] transition-colors text-sm">Batal</button><button onClick={executeSendMedia} disabled={sending} className="px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] disabled:bg-slate-300 transition-colors text-sm flex items-center gap-2">{sending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} Kirim</button></div>
           </div>
         </div>
       )}
@@ -1910,10 +1095,6 @@ export default function Inbox() {
     </ErrorBoundary>
   );
 }
-
-
-
-
 
 
 

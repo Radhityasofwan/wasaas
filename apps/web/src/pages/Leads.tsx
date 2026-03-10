@@ -47,13 +47,21 @@ const fmtDate = (dateStr: string) => {
   return new Date(dateStr).toLocaleString("id-ID", { day: "2-digit", month: "short", year: "numeric", hour: "2-digit", minute: "2-digit" });
 };
 
+const formatDisplayPhone = (phone: string) => {
+  const raw = String(phone || "").trim();
+  if (!raw) return "-";
+  return raw.startsWith("+") ? raw : `+${raw}`;
+};
+
 // ============================================================================
 // 2. TYPE DEFINITIONS
 // ============================================================================
 
 type LeadRow = { id: number; to_number: string; name: string | null; source: string; status: 'cold' | 'warm' | 'hot' | 'converted' | 'dead'; tags_json: any; last_interacted_at: string; created_at: string; total_broadcasts: number; total_followups: number; };
 type Stats = { total: number; hot: number; warm: number; cold: number; converted: number; };
-type MsgRow = { id: number; direction: "in" | "out"; type: string; text: string | null; status: string; time: string; };
+type MsgRow = { id: number; waMessageId?: string | null; direction: "in" | "out"; type: string; text: string | null; status: string; time: string; };
+type InvalidLeadAuditRow = { id: number; channel: string; raw_input: string; reason: string; source_hint?: string | null; payload_json?: string | null; created_at: string; };
+type InvalidLeadAuditSummary = { channel: string; reason: string; total: number; };
 
 const ALL_SOURCES = [
   { id: 'meta_ads', label: 'Meta Ads (FB/IG)' },
@@ -92,29 +100,49 @@ export default function Leads() {
   const [bcModalOpen, setBcModalOpen] = useState(false);
   const [bcPayload, setBcPayload] = useState({ sessionKey: "", templateId: "", text: "", delay: "2000" });
   const [bcPreviewTrigger, setBcPreviewTrigger] = useState(0);
+  const [bcSubmitting, setBcSubmitting] = useState(false);
   
   const [fuModalOpen, setFuModalOpen] = useState(false);
   const [fuPayload, setFuPayload] = useState({ sessionKey: "", campaignId: "" });
+  const [fuSubmitting, setFuSubmitting] = useState(false);
 
   const [chatModal, setChatModal] = useState<{ open: boolean; lead: LeadRow | null }>({ open: false, lead: null });
   const [chatSession, setChatSession] = useState("");
   const [chatMessages, setChatMessages] = useState<MsgRow[]>([]);
   const [chatText, setChatText] = useState("");
   const [chatSending, setChatSending] = useState(false);
+  const [chatLoading, setChatLoading] = useState(false);
   
   const chatScrollRef = useRef<HTMLDivElement>(null);
-  const isLidRef = useRef<boolean>(false); 
 
   // SMART ENGINE SETTINGS MODAL
   const [settingsModalOpen, setSettingsModalOpen] = useState(false);
   const [rulesPayload, setRulesPayload] = useState({ 
-    hot_keywords: "pesan, order, beli", 
+    hot_keywords: "pesan, order, beli, harga, transfer", 
     hot_sources: ["broadcast_reply", "followup_reply"],
     warm_keywords: "tanya, info, halo",
     warm_sources: ["meta_ads", "web", "ig", "tiktok"], 
     cold_days: 7 
   });
   const [savingRules, setSavingRules] = useState(false);
+
+  // CLASSIFIER DEBUG MODAL
+  const [classifierModalOpen, setClassifierModalOpen] = useState(false);
+  const [classifierLoading, setClassifierLoading] = useState(false);
+  const [classifierResult, setClassifierResult] = useState<any | null>(null);
+  const [classifierPayload, setClassifierPayload] = useState({
+    text: "",
+    quoted_message_id: "",
+    ad_title: "",
+    ad_body: "",
+    source_hint: "",
+    existing_status: ""
+  });
+  const [auditModalOpen, setAuditModalOpen] = useState(false);
+  const [auditLoading, setAuditLoading] = useState(false);
+  const [auditRows, setAuditRows] = useState<InvalidLeadAuditRow[]>([]);
+  const [auditSummary, setAuditSummary] = useState<InvalidLeadAuditSummary[]>([]);
+  const [auditFilter, setAuditFilter] = useState({ channel: "", reason: "" });
 
   // EXPORT MODAL STATE
   const [exportModalOpen, setExportModalOpen] = useState(false);
@@ -212,25 +240,19 @@ export default function Leads() {
   useEffect(() => {
     let intervalId: any;
     if (chatModal.open && chatModal.lead && chatSession) {
+      setChatLoading(true);
       const fetchChat = async () => {
         try {
           const cleanNum = chatModal.lead!.to_number.replace(/\D/g, '');
-          const peerJidStd = `${cleanNum}@s.whatsapp.net`;
-          const peerJidLid = `${cleanNum}@lid`;
-
-          const [resStd, resLid] = await Promise.all([
-            apiFetch<any>(`ui/messages?sessionKey=${encodeURIComponent(chatSession)}&peer=${encodeURIComponent(peerJidStd)}&limit=50`).catch(() => ({ messages: [] })),
-            apiFetch<any>(`ui/messages?sessionKey=${encodeURIComponent(chatSession)}&peer=${encodeURIComponent(peerJidLid)}&limit=50`).catch(() => ({ messages: [] }))
-          ]);
-
-          if (resLid.messages && resLid.messages.length > 0) {
-            isLidRef.current = true;
-          } else {
-            isLidRef.current = false;
+          const res = await apiFetch<any>(`ui/messages?sessionKey=${encodeURIComponent(chatSession)}&peer=${encodeURIComponent(cleanNum)}&limit=80`).catch(() => ({ messages: [] }));
+          const dedupe = new Map<string, any>();
+          for (const m of (res.messages || [])) {
+            const key =
+              String(m?.waMessageId || "").trim() ||
+              `${m?.direction || ""}|${m?.type || ""}|${m?.text || ""}|${m?.time || ""}`;
+            if (!dedupe.has(key)) dedupe.set(key, m);
           }
-
-          const combined = [...(resStd.messages || []), ...(resLid.messages || [])]
-            .sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
+          const combined = Array.from(dedupe.values()).sort((a, b) => new Date(a.time).getTime() - new Date(b.time).getTime());
 
           setChatMessages(prev => {
             if (prev.length !== combined.length) {
@@ -243,7 +265,10 @@ export default function Leads() {
             }
             return changed ? combined : prev;
           });
-        } catch (e) {}
+        } catch (e) {
+        } finally {
+          setChatLoading(false);
+        }
       };
       fetchChat();
       intervalId = setInterval(fetchChat, 3000);
@@ -291,6 +316,57 @@ export default function Leads() {
       };
     });
   };
+
+  const executeTestClassifier = async () => {
+    setClassifierLoading(true);
+    setClassifierResult(null);
+    try {
+      const payload: any = {
+        text: classifierPayload.text || "",
+        quoted_message_id: classifierPayload.quoted_message_id || null,
+        ad_title: classifierPayload.ad_title || null,
+        ad_body: classifierPayload.ad_body || null,
+        source_hint: classifierPayload.source_hint || null,
+        existing_status: classifierPayload.existing_status || null
+      };
+      const res = await apiFetch<any>("leads/debug/classify", {
+        method: "POST",
+        body: JSON.stringify(payload)
+      });
+      setClassifierResult(res);
+    } catch (e: any) {
+      setClassifierResult({ ok: false, error: e.message || "Gagal test classifier." });
+    } finally {
+      setClassifierLoading(false);
+    }
+  };
+
+  const loadInvalidLeadsAudit = async () => {
+    setAuditLoading(true);
+    try {
+      const qs = new URLSearchParams();
+      qs.set("limit", "100");
+      if (auditFilter.channel) qs.set("channel", auditFilter.channel);
+      if (auditFilter.reason) qs.set("reason", auditFilter.reason);
+      const res = await apiFetch<any>(`leads/audit/invalid?${qs.toString()}`);
+      setAuditRows(res.data || []);
+      setAuditSummary(res.summary || []);
+    } catch (e) {
+      setAuditRows([]);
+      setAuditSummary([]);
+    } finally {
+      setAuditLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    let intervalId: any;
+    if (auditModalOpen) {
+      loadInvalidLeadsAudit();
+      intervalId = setInterval(() => { loadInvalidLeadsAudit(); }, 15000);
+    }
+    return () => clearInterval(intervalId);
+  }, [auditModalOpen, auditFilter.channel, auditFilter.reason]);
 
   // ============================================================================
   // EXPORT ENGINE (XLSX - SHEETJS VIA DYNAMIC IMPORT)
@@ -416,8 +492,97 @@ export default function Leads() {
   const parseTags = (tagsJson: any) => { try { const t = typeof tagsJson === 'string' ? JSON.parse(tagsJson) : tagsJson; if (t && t.name && t.color) return <span className={`px-2 py-0.5 rounded text-[10px] font-bold text-white ${t.color}`}>{t.name}</span>; } catch(e) {} return null; };
   const toggleLeadSelection = (num: string) => { setSelectedLeads(p => p.includes(num) ? p.filter(x => x !== num) : [...p, num]); };
   const openWaMe = (num: string) => { window.open(`https://wa.me/${num.replace(/\D/g, '')}`, "_blank"); };
-  const executeRetargetBroadcast = async () => { setBcModalOpen(false); setSelectedLeads([]); setIsSelectionMode(false); };
-  const executeRetargetFollowUp = async () => { setFuModalOpen(false); setSelectedLeads([]); setIsSelectionMode(false); };
+  const normalizeLeadTargets = (targets: string[]) => {
+    const seen = new Set<string>();
+    const output: string[] = [];
+    for (const raw of targets) {
+      let cleaned = String(raw || "").replace(/\D/g, "");
+      if (!cleaned) continue;
+      if (cleaned.startsWith("0")) cleaned = `62${cleaned.slice(1)}`;
+      if (cleaned.length < 8) continue;
+      if (!seen.has(cleaned)) {
+        seen.add(cleaned);
+        output.push(cleaned);
+      }
+    }
+    return output;
+  };
+  const executeRetargetBroadcast = async () => {
+    if (bcSubmitting) return;
+    const targets = normalizeLeadTargets(selectedLeads);
+    if (!targets.length) {
+      alert("Tidak ada nomor valid untuk dikirim.");
+      return;
+    }
+    if (!bcPayload.sessionKey) {
+      alert("Pilih sesi WA pengirim terlebih dahulu.");
+      return;
+    }
+    if (!bcPayload.text.trim()) {
+      alert("Isi pesan broadcast tidak boleh kosong.");
+      return;
+    }
+
+    setBcSubmitting(true);
+    try {
+      await apiFetch<any>("broadcast/create", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionKey: bcPayload.sessionKey,
+          delayMs: Math.max(0, Number(bcPayload.delay) || 1200),
+          targets,
+          text: bcPayload.text.trim(),
+          msgType: "text"
+        })
+      });
+      setBcModalOpen(false);
+      setSelectedLeads([]);
+      setIsSelectionMode(false);
+      await loadData(false);
+      setTimeout(() => { loadData(false); }, 2000);
+    } catch (e: any) {
+      alert("Gagal kirim broadcast: " + (e?.message || "Unknown error"));
+    } finally {
+      setBcSubmitting(false);
+    }
+  };
+  const executeRetargetFollowUp = async () => {
+    if (fuSubmitting) return;
+    const targets = normalizeLeadTargets(selectedLeads);
+    if (!targets.length) {
+      alert("Tidak ada nomor valid untuk dijadwalkan.");
+      return;
+    }
+    if (!fuPayload.sessionKey) {
+      alert("Pilih sesi WA pengirim terlebih dahulu.");
+      return;
+    }
+    if (!fuPayload.campaignId) {
+      alert("Pilih campaign follow up terlebih dahulu.");
+      return;
+    }
+
+    setFuSubmitting(true);
+    try {
+      await apiFetch<any>("followup/add-targets", {
+        method: "POST",
+        body: JSON.stringify({
+          sessionKey: fuPayload.sessionKey,
+          campaignId: Number(fuPayload.campaignId),
+          targets
+        })
+      });
+      setFuModalOpen(false);
+      setSelectedLeads([]);
+      setIsSelectionMode(false);
+      await loadData(false);
+      setTimeout(() => { loadData(false); }, 2000);
+    } catch (e: any) {
+      alert("Gagal jadwalkan follow up: " + (e?.message || "Unknown error"));
+    } finally {
+      setFuSubmitting(false);
+    }
+  };
   
   const sendQuickChat = async () => { 
     if (!chatText.trim() || chatSending || !chatModal.lead || !chatSession) return;
@@ -432,6 +597,7 @@ export default function Leads() {
          body: JSON.stringify({ sessionKey: chatSession, to: peerJid, text: chatText.trim() })
        });
        setChatText("");
+       await loadData(false);
     } catch(e: any) { 
        alert("Gagal kirim: " + e.message); 
     } finally { 
@@ -481,6 +647,18 @@ export default function Leads() {
             className={`flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-xs uppercase tracking-wider transition-all border shadow-sm ${isSelectionMode ? 'bg-[#c2e7ff] text-[#001d35] border-transparent' : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-50'}`}
           >
             {isSelectionMode ? <><XCircle size={16}/> Batal</> : <><CheckSquare size={16}/> Mode Massal</>}
+          </button>
+          <button 
+            onClick={() => setClassifierModalOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-slate-600 border border-slate-200 font-bold text-xs uppercase tracking-wider shadow-sm hover:text-[#0b57d0] hover:border-[#c2e7ff] hover:bg-[#f0f4f9] transition-all"
+          >
+            <Activity size={16} /> Test Classifier
+          </button>
+          <button 
+            onClick={() => setAuditModalOpen(true)}
+            className="flex items-center gap-2 px-5 py-2.5 rounded-full bg-white text-slate-600 border border-slate-200 font-bold text-xs uppercase tracking-wider shadow-sm hover:text-[#0b57d0] hover:border-[#c2e7ff] hover:bg-[#f0f4f9] transition-all"
+          >
+            <Info size={16} /> Audit Invalid
           </button>
           <button 
             onClick={() => setSettingsModalOpen(true)}
@@ -589,7 +767,7 @@ export default function Leads() {
                        {isLid ? (
                          <span className="bg-slate-100 text-slate-500 px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wider font-bold" title="ID Disembunyikan oleh Meta (LID)">Hidden ID</span>
                        ) : (
-                         <span className="text-[#0b57d0]">+{lead.to_number}</span>
+                         <span className="text-[#0b57d0]">{formatDisplayPhone(lead.to_number)}</span>
                        )}
                        {isLid && <span className="text-[10px] opacity-50">({lead.to_number})</span>}
                     </div>
@@ -660,7 +838,7 @@ export default function Leads() {
                      <div onClick={() => !isSelectionMode && setChatModal({ open: true, lead })} className={!isSelectionMode ? 'cursor-pointer' : ''}>
                         <h3 className="font-bold text-slate-800 text-sm">{lead.name || 'Pelanggan Baru'}</h3>
                         <div className="text-xs font-mono text-slate-500 mt-0.5">
-                          {isLid ? <span className="bg-slate-100 px-1 rounded text-[10px]">Hidden ID</span> : `+${lead.to_number}`}
+                          {isLid ? <span className="bg-slate-100 px-1 rounded text-[10px]">Hidden ID</span> : formatDisplayPhone(lead.to_number)}
                         </div>
                      </div>
                    </div>
@@ -723,6 +901,218 @@ export default function Leads() {
       {/* ============================================================================ */}
       {/* 4. MODALS AREA (EXPORT, QUICK CHAT, SETTINGS, BROADCAST, FOLLOW UP) */}
       {/* ============================================================================ */}
+
+      {/* INVALID LEADS AUDIT MODAL */}
+      {auditModalOpen && (
+        <div className="fixed inset-0 z-[130] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-5xl bg-white rounded-3xl p-6 shadow-xl animate-in zoom-in-95 max-h-[92vh] overflow-y-auto scrollbar-hide">
+            <div className="flex items-center justify-between mb-5 border-b border-slate-100 pb-4">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Info size={20} className="text-[#0b57d0]"/> Audit Invalid Leads
+              </h3>
+              <button onClick={() => setAuditModalOpen(false)} className="text-slate-400 hover:bg-slate-100 p-1.5 rounded-full transition-colors">
+                <X size={18}/>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-4 gap-3 mb-4">
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Channel</label>
+                <select
+                  value={auditFilter.channel}
+                  onChange={e => setAuditFilter({ ...auditFilter, channel: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700"
+                >
+                  <option value="">Semua Channel</option>
+                  <option value="wa.incoming">wa.incoming</option>
+                  <option value="leads.label">leads.label</option>
+                </select>
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Reason</label>
+                <input
+                  value={auditFilter.reason}
+                  onChange={e => setAuditFilter({ ...auditFilter, reason: e.target.value })}
+                  placeholder="invalid_indonesia_phone"
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700"
+                />
+              </div>
+              <div className="md:col-span-2 flex items-end justify-end">
+                <button onClick={loadInvalidLeadsAudit} disabled={auditLoading} className="flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] disabled:bg-slate-300 text-sm">
+                  {auditLoading ? <Loader2 size={16} className="animate-spin"/> : <RefreshCw size={16} />} Refresh Audit
+                </button>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap gap-2 mb-4">
+              {auditSummary.length === 0 ? (
+                <span className="text-xs text-slate-400">Belum ada summary.</span>
+              ) : (
+                auditSummary.map((s, idx) => (
+                  <span key={`${s.channel}_${s.reason}_${idx}`} className="px-2.5 py-1 rounded-md bg-[#f8fafd] border border-slate-200 text-[11px] font-bold text-slate-700">
+                    {s.channel} / {s.reason}: {s.total}
+                  </span>
+                ))
+              )}
+            </div>
+
+            <div className="rounded-2xl border border-slate-100 overflow-hidden">
+              <table className="w-full text-left">
+                <thead className="bg-[#f8fafd] border-b border-slate-100">
+                  <tr className="text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+                    <th className="px-4 py-3">Waktu</th>
+                    <th className="px-4 py-3">Channel</th>
+                    <th className="px-4 py-3">Input Mentah</th>
+                    <th className="px-4 py-3">Reason</th>
+                    <th className="px-4 py-3">Source Hint</th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-50">
+                  {auditLoading ? (
+                    <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-400"><Loader2 size={20} className="animate-spin mx-auto mb-2"/>Memuat audit...</td></tr>
+                  ) : auditRows.length === 0 ? (
+                    <tr><td colSpan={5} className="px-4 py-10 text-center text-slate-400">Tidak ada event invalid leads.</td></tr>
+                  ) : auditRows.map(r => (
+                    <tr key={r.id} className="text-sm">
+                      <td className="px-4 py-3 text-slate-600">{fmtDate(r.created_at)}</td>
+                      <td className="px-4 py-3"><span className="px-2 py-0.5 rounded bg-slate-100 text-slate-700 text-[11px] font-bold">{r.channel}</span></td>
+                      <td className="px-4 py-3 font-mono text-[12px] text-slate-800">{r.raw_input}</td>
+                      <td className="px-4 py-3 text-rose-600 font-bold text-[12px]">{r.reason}</td>
+                      <td className="px-4 py-3 text-slate-500 text-[12px]">{r.source_hint || "-"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* EXPORT XLSX MODAL */}
+      {classifierModalOpen && (
+        <div className="fixed inset-0 z-[125] flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
+          <div className="w-full max-w-2xl bg-white rounded-3xl p-6 shadow-xl animate-in zoom-in-95 max-h-[92vh] overflow-y-auto scrollbar-hide">
+            <div className="flex items-center justify-between mb-5 border-b border-slate-100 pb-4">
+              <h3 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Activity size={20} className="text-[#0b57d0]"/> Test Classifier
+              </h3>
+              <button onClick={() => setClassifierModalOpen(false)} className="text-slate-400 hover:bg-slate-100 p-1.5 rounded-full transition-colors">
+                <X size={18}/>
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
+              <div className="md:col-span-2">
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Text Pesan</label>
+                <textarea
+                  rows={4}
+                  value={classifierPayload.text}
+                  onChange={e => setClassifierPayload({ ...classifierPayload, text: e.target.value })}
+                  placeholder="Contoh: Halo kak, saya mau tanya harga dan transfer..."
+                  className="w-full px-4 py-3 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 resize-none focus:ring-2 focus:ring-[#c2e7ff]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Quoted Message ID (Opsional)</label>
+                <input
+                  value={classifierPayload.quoted_message_id}
+                  onChange={e => setClassifierPayload({ ...classifierPayload, quoted_message_id: e.target.value })}
+                  placeholder="BAE5...."
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Source Hint (Opsional)</label>
+                <select
+                  value={classifierPayload.source_hint}
+                  onChange={e => setClassifierPayload({ ...classifierPayload, source_hint: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
+                >
+                  <option value="">Auto Detect</option>
+                  <option value="meta_ads">meta_ads</option>
+                  <option value="ig">ig</option>
+                  <option value="tiktok">tiktok</option>
+                  <option value="web">web</option>
+                  <option value="random">random</option>
+                  <option value="broadcast_reply">broadcast_reply</option>
+                  <option value="followup_reply">followup_reply</option>
+                </select>
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Ad Title (Opsional)</label>
+                <input
+                  value={classifierPayload.ad_title}
+                  onChange={e => setClassifierPayload({ ...classifierPayload, ad_title: e.target.value })}
+                  placeholder="Nama campaign ads"
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
+                />
+              </div>
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Ad Body (Opsional)</label>
+                <input
+                  value={classifierPayload.ad_body}
+                  onChange={e => setClassifierPayload({ ...classifierPayload, ad_body: e.target.value })}
+                  placeholder="Body iklan"
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
+                />
+              </div>
+
+              <div>
+                <label className="text-xs font-bold text-slate-700 block mb-1.5">Existing Status (Opsional)</label>
+                <select
+                  value={classifierPayload.existing_status}
+                  onChange={e => setClassifierPayload({ ...classifierPayload, existing_status: e.target.value })}
+                  className="w-full px-3 py-2.5 rounded-xl bg-[#f0f4f9] border-none outline-none text-sm font-medium text-slate-700 focus:ring-2 focus:ring-[#c2e7ff]"
+                >
+                  <option value="">none</option>
+                  <option value="cold">cold</option>
+                  <option value="warm">warm</option>
+                  <option value="hot">hot</option>
+                  <option value="converted">converted</option>
+                  <option value="dead">dead</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="flex justify-end gap-2 mb-4">
+              <button onClick={() => setClassifierModalOpen(false)} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] text-sm">Tutup</button>
+              <button onClick={executeTestClassifier} disabled={classifierLoading} className="flex items-center gap-2 px-5 py-2.5 rounded-full font-bold text-white bg-[#0b57d0] hover:bg-[#001d35] disabled:bg-slate-300 text-sm">
+                {classifierLoading ? <Loader2 size={16} className="animate-spin"/> : <RefreshCw size={16} />} Jalankan Test
+              </button>
+            </div>
+
+            {classifierResult && (
+              <div className="bg-[#f8fafd] border border-slate-100 rounded-2xl p-4">
+                {classifierResult.ok ? (
+                  <>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
+                      <div className="text-xs font-bold text-slate-600">Source: <span className="text-[#0b57d0]">{classifierResult.classification?.source || "-"}</span></div>
+                      <div className="text-xs font-bold text-slate-600">Temperature: <span className="text-[#0b57d0]">{classifierResult.classification?.temperature || "-"}</span></div>
+                    </div>
+                    <div className="mb-3">
+                      <p className="text-[11px] font-bold text-slate-600 uppercase tracking-wider mb-1.5">Reasons</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {(classifierResult.reasons || []).length === 0 ? (
+                          <span className="text-xs text-slate-400">No reason matched.</span>
+                        ) : (
+                          (classifierResult.reasons || []).map((r: string, idx: number) => (
+                            <span key={idx} className="px-2 py-0.5 rounded-md bg-white border border-slate-200 text-[10px] font-bold text-slate-600">{r}</span>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                    <pre className="text-[11px] leading-relaxed bg-white border border-slate-200 rounded-xl p-3 overflow-auto text-slate-700">{JSON.stringify(classifierResult, null, 2)}</pre>
+                  </>
+                ) : (
+                  <div className="text-sm text-rose-600 font-medium">{classifierResult.error || "Gagal menjalankan test classifier."}</div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* EXPORT XLSX MODAL */}
       {exportModalOpen && (
@@ -877,23 +1267,23 @@ export default function Leads() {
       {/* QUICK CHAT MODAL */}
       {chatModal.open && chatModal.lead && (
         <div className="fixed inset-0 z-[100] flex sm:items-center sm:justify-end sm:p-4 bg-slate-900/40 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full h-full sm:h-auto sm:w-[400px] sm:max-h-[90vh] bg-white sm:rounded-3xl shadow-2xl flex flex-col overflow-hidden animate-in slide-in-from-bottom-full sm:slide-in-from-right-8">
+          <div className="w-full h-full sm:h-auto sm:w-[420px] sm:max-h-[90vh] bg-white sm:rounded-3xl shadow-2xl border border-slate-100 flex flex-col overflow-hidden animate-in slide-in-from-bottom-full sm:slide-in-from-right-8">
              
              {/* Chat Header */}
-             <div className="bg-white px-4 py-3 border-b border-slate-100 shrink-0 flex items-center justify-between z-10">
+             <div className="bg-white px-4 py-3.5 border-b border-slate-100 shrink-0 flex items-center justify-between z-10">
                 <div className="flex items-center gap-3">
                   <button onClick={() => setChatModal({ open: false, lead: null })} className="p-1 sm:hidden text-slate-500 hover:bg-slate-100 rounded-full"><ArrowLeft size={20}/></button>
                   <div className="w-10 h-10 rounded-full bg-[#f0f4f9] text-[#0b57d0] flex items-center justify-center font-bold text-lg">{(chatModal.lead.name ? chatModal.lead.name.charAt(0) : 'P').toUpperCase()}</div>
                   <div>
                     <h3 className="text-sm font-bold text-slate-800">{chatModal.lead.name || 'Pelanggan'}</h3>
-                    <p className="text-xs font-medium text-slate-500 font-mono">+{chatModal.lead.to_number}</p>
+                    <p className="text-xs font-medium text-slate-500 font-mono">{formatDisplayPhone(chatModal.lead.to_number)}</p>
                   </div>
                 </div>
                 <button onClick={() => setChatModal({ open: false, lead: null })} className="hidden sm:block p-1.5 text-slate-400 hover:bg-slate-100 rounded-full"><X size={18} /></button>
              </div>
              
              {/* Session Selector */}
-             <div className="bg-[#f8fafd] px-4 py-2 flex items-center justify-between border-b border-slate-100 shrink-0">
+             <div className="bg-[#f8fafd] px-4 py-2.5 flex items-center justify-between border-b border-slate-100 shrink-0">
                <span className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">Kirim via Sesi:</span>
                <select value={chatSession} onChange={e => setChatSession(e.target.value)} className="bg-white border border-slate-200 text-[10px] font-bold text-slate-700 py-1 px-2 rounded-md outline-none cursor-pointer">
                  {sessions.map(s => <option key={s.session_key} value={s.session_key}>{s.session_key}</option>)}
@@ -902,7 +1292,8 @@ export default function Leads() {
              
              {/* Chat Messages */}
              <div ref={chatScrollRef} className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50 scrollbar-hide scroll-smooth">
-                {chatMessages.length === 0 && <div className="text-center py-10 text-slate-400"><MessageSquare size={32} className="mx-auto mb-2 opacity-50" /><p className="text-xs font-medium">Memuat Obrolan...</p></div>}
+                {chatLoading && <div className="text-center py-10 text-slate-400"><Loader2 size={28} className="mx-auto mb-2 animate-spin" /><p className="text-xs font-medium">Memuat Obrolan...</p></div>}
+                {!chatLoading && chatMessages.length === 0 && <div className="text-center py-10 text-slate-400"><MessageSquare size={32} className="mx-auto mb-2 opacity-50" /><p className="text-xs font-medium">Belum ada obrolan untuk kontak ini.</p></div>}
                 {chatMessages.map(msg => {
                   const isOut = msg.direction === 'out';
                   return (
@@ -921,7 +1312,7 @@ export default function Leads() {
              
              {/* Chat Input */}
              <div className="p-3 bg-white border-t border-slate-100 shrink-0">
-               <div className="flex items-end gap-2 bg-[#f0f4f9] rounded-[1.5rem] p-1.5 focus-within:ring-2 focus-within:ring-[#c2e7ff] transition-all">
+               <div className="flex items-end gap-2 bg-[#f0f4f9] border border-slate-200 rounded-[1.5rem] p-1.5 focus-within:ring-2 focus-within:ring-[#c2e7ff] transition-all">
                   <textarea value={chatText} onChange={e => setChatText(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendQuickChat(); } }} placeholder="Ketik pesan..." rows={1} className="flex-1 bg-transparent border-none py-2 px-3 text-sm font-medium outline-none resize-none max-h-24 text-slate-800" />
                   <button onClick={sendQuickChat} disabled={!chatText.trim() || chatSending} className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 transition-colors ${chatText.trim() && !chatSending ? 'bg-[#0b57d0] text-white hover:bg-[#001d35]' : 'bg-transparent text-slate-400 cursor-not-allowed'}`}>{chatSending ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} className="ml-0.5" />}</button>
                </div>
@@ -952,7 +1343,9 @@ export default function Leads() {
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setBcModalOpen(false)} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] text-sm">Batal</button>
-              <button onClick={executeRetargetBroadcast} className="px-5 py-2.5 rounded-full font-bold text-white bg-emerald-600 hover:bg-emerald-700 text-sm flex items-center gap-1.5"><Send size={14}/> Kirim</button>
+              <button disabled={bcSubmitting} onClick={executeRetargetBroadcast} className="px-5 py-2.5 rounded-full font-bold text-white bg-emerald-600 hover:bg-emerald-700 disabled:opacity-60 text-sm flex items-center gap-1.5">
+                {bcSubmitting ? <Loader2 size={14} className="animate-spin"/> : <Send size={14}/>} Kirim
+              </button>
             </div>
           </div>
         </div>
@@ -980,7 +1373,9 @@ export default function Leads() {
             </div>
             <div className="flex gap-2 justify-end">
               <button onClick={() => setFuModalOpen(false)} className="px-5 py-2.5 rounded-full font-bold text-slate-600 hover:bg-[#f0f4f9] text-sm">Batal</button>
-              <button onClick={executeRetargetFollowUp} disabled={!fuPayload.campaignId} className="px-5 py-2.5 rounded-full font-bold text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-sm">Jadwalkan</button>
+              <button onClick={executeRetargetFollowUp} disabled={!fuPayload.campaignId || fuSubmitting} className="px-5 py-2.5 rounded-full font-bold text-white bg-orange-600 hover:bg-orange-700 disabled:opacity-50 text-sm">
+                {fuSubmitting ? "Memproses..." : "Jadwalkan"}
+              </button>
             </div>
           </div>
         </div>

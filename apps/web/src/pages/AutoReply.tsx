@@ -34,9 +34,20 @@ interface AutoReplyRule {
   session_key: string | null;
   keyword: string;
   match_type: "exact" | "contains" | "startswith";
-  reply_text: string;
+  reply_text: string | null;
+  template_id?: number | null;
+  template_name?: string | null;
+  template_type?: string | null;
   is_active: boolean;
   delay_ms: number;
+  typing_enabled?: boolean;
+  typing_ms?: number | null;
+}
+
+interface TemplateRow {
+  id: number;
+  name: string;
+  message_type: string;
 }
 
 interface WaSession {
@@ -51,6 +62,7 @@ export default function AutoReply() {
 
   const [rules, setRules] = useState<AutoReplyRule[]>([]);
   const [activeSessions, setActiveSessions] = useState<WaSession[]>([]);
+  const [templates, setTemplates] = useState<TemplateRow[]>([]);
   
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
@@ -62,17 +74,23 @@ export default function AutoReply() {
   const [keyword, setKeyword] = useState("");
   const [matchType, setMatchType] = useState<"exact" | "contains" | "startswith">("exact");
   const [replyText, setReplyText] = useState("");
-  const [delayMs, setDelayMs] = useState("2000");
+  const [templateId, setTemplateId] = useState("");
+  const [delayMs, setDelayMs] = useState("3000");
+  const [typingEnabled, setTypingEnabled] = useState(true);
+  const [typingMs, setTypingMs] = useState("2000");
+  const [typingSyncWithDelay, setTypingSyncWithDelay] = useState(true);
 
   const fetchData = async () => {
     setLoading(true);
     try {
-      const [rulesRes, sessionsRes] = await Promise.all([
+      const [rulesRes, sessionsRes, templatesRes] = await Promise.all([
         apiFetch<any>("auto-reply").catch(() => ({ data: [] })),
-        apiFetch<any>("ui/sessions").catch(() => ({ sessions: [] }))
+        apiFetch<any>("ui/sessions").catch(() => ({ sessions: [] })),
+        apiFetch<any>("templates").catch(() => ({ data: [] }))
       ]);
       setRules(rulesRes.data || []);
       setActiveSessions(sessionsRes.sessions || []);
+      setTemplates(templatesRes.data || []);
     } catch (err) {
       console.error("Gagal memuat data:", err);
     } finally {
@@ -88,7 +106,11 @@ export default function AutoReply() {
     setKeyword("");
     setMatchType("exact");
     setReplyText("");
-    setDelayMs("2000");
+    setTemplateId("");
+    setDelayMs("3000");
+    setTypingEnabled(true);
+    setTypingMs("2000");
+    setTypingSyncWithDelay(true);
     setIsCreating(true);
   };
 
@@ -97,8 +119,13 @@ export default function AutoReply() {
     setSelectedSession(rule.session_key || "");
     setKeyword(rule.keyword);
     setMatchType(rule.match_type);
-    setReplyText(rule.reply_text);
-    setDelayMs(String(rule.delay_ms || 2000));
+    setReplyText(rule.reply_text || "");
+    setTemplateId(rule.template_id ? String(rule.template_id) : "");
+    const hasTypingConfig = rule.typing_ms !== undefined && rule.typing_ms !== null;
+    setTypingSyncWithDelay(!hasTypingConfig);
+    setTypingEnabled(rule.typing_enabled === undefined ? true : Boolean(rule.typing_enabled));
+    setTypingMs(String(hasTypingConfig ? Number(rule.typing_ms || 0) : Number(rule.delay_ms || 2000)));
+    setDelayMs(String(hasTypingConfig ? Number(rule.delay_ms || 0) : Number(rule.delay_ms || 2000)));
     setIsCreating(true);
   };
 
@@ -107,17 +134,33 @@ export default function AutoReply() {
     const cleanKeyword = keyword.trim();
     const cleanReplyText = replyText.trim();
     const cleanSession = selectedSession.trim();
+    const cleanTemplateId = templateId.trim();
+    const delayValue = Number(delayMs || 0);
+    const typingValue = Number(typingMs || 0);
+    const sendDelayMs = Math.max(0, delayValue);
+    const typingDurationMs = Math.max(0, typingValue);
 
-    if (!cleanKeyword || !cleanReplyText) return alert("Keyword dan balasan wajib diisi!");
+    if (!cleanKeyword) return alert("Keyword wajib diisi!");
+    if (!cleanReplyText && !cleanTemplateId) return alert("Isi balasan teks atau pilih template media.");
+    if (!Number.isFinite(sendDelayMs)) return alert("Jeda kirim tidak valid.");
+    if (typingEnabled && !typingSyncWithDelay && !Number.isFinite(typingDurationMs)) return alert("Durasi typing indicator tidak valid.");
     
     setSaving(true);
     try {
+      const payloadDelayMs = typingSyncWithDelay ? sendDelayMs : sendDelayMs;
+      const payloadTypingMs = typingEnabled
+        ? (typingSyncWithDelay ? null : typingDurationMs)
+        : (typingSyncWithDelay ? null : 0);
+
       const payload = { 
         session_key: cleanSession || null, 
         keyword: cleanKeyword, 
         match_type: matchType, 
-        reply_text: cleanReplyText,
-        delay_ms: Number(delayMs)
+        reply_text: cleanReplyText || null,
+        template_id: cleanTemplateId ? Number(cleanTemplateId) : null,
+        delay_ms: payloadDelayMs,
+        typing_enabled: typingEnabled,
+        typing_ms: payloadTypingMs
       };
 
       if (editingId) {
@@ -181,6 +224,19 @@ export default function AutoReply() {
     startswith: "Diawali Dengan"
   };
 
+  const getTypingDurationMs = (rule: AutoReplyRule) => {
+    const hasTypingConfig = rule.typing_ms !== undefined && rule.typing_ms !== null;
+    if (rule.typing_enabled === false) return 0;
+    return hasTypingConfig ? Number(rule.typing_ms || 0) : Number(rule.delay_ms || 2000);
+  };
+
+  const getExtraDelayMs = (rule: AutoReplyRule) => {
+    const hasTypingConfig = rule.typing_ms !== undefined && rule.typing_ms !== null;
+    return hasTypingConfig ? Number(rule.delay_ms || 0) : 0;
+  };
+
+  const isTypingSynced = (rule: AutoReplyRule) => rule.typing_ms === undefined || rule.typing_ms === null;
+
   return (
     <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 animate-in fade-in duration-500 pb-20">
       
@@ -238,19 +294,58 @@ export default function AutoReply() {
                   </div>
                </div>
 
-               <div className="space-y-2.5">
-                  <label className="text-xs font-bold text-slate-700 block">Jeda Mengetik Organik (Milidetik)</label>
+               <div className="space-y-3">
+                  <label className="text-xs font-bold text-slate-700 block">Typing Indicator</label>
+                  <label className="flex items-center justify-between px-4 py-3 rounded-xl bg-[#f0f4f9] cursor-pointer">
+                    <span className="text-sm font-semibold text-slate-700">Kirim status "Sedang mengetik..."</span>
+                    <input
+                      type="checkbox"
+                      checked={typingEnabled}
+                      onChange={(e) => setTypingEnabled(e.target.checked)}
+                      className="w-4 h-4 text-[#0b57d0]"
+                    />
+                  </label>
+
+                  <label className={`flex items-center justify-between px-4 py-3 rounded-xl ${typingEnabled ? "bg-[#f0f4f9]" : "bg-slate-100"} cursor-pointer`}>
+                    <span className="text-sm font-semibold text-slate-700">Sinkronkan typing dengan jeda kirim (natural)</span>
+                    <input
+                      type="checkbox"
+                      checked={typingSyncWithDelay}
+                      onChange={(e) => setTypingSyncWithDelay(e.target.checked)}
+                      className="w-4 h-4 text-[#0b57d0]"
+                      disabled={!typingEnabled}
+                    />
+                  </label>
+
                   <div className="relative">
-                    <input 
+                    <input
                       type="number" min="0" step="100"
-                      value={delayMs} onChange={(e) => setDelayMs(e.target.value)} 
-                      className="w-full pl-4 pr-12 py-3.5 rounded-xl bg-[#f0f4f9] border-none font-medium text-slate-800 outline-none focus:ring-2 focus:ring-[#c2e7ff] transition-all" 
-                      placeholder="2000" required 
+                      value={delayMs} onChange={(e) => setDelayMs(e.target.value)}
+                      className="w-full pl-4 pr-12 py-3.5 rounded-xl bg-[#f0f4f9] border-none font-medium text-slate-800 outline-none focus:ring-2 focus:ring-[#c2e7ff] transition-all"
+                      placeholder={typingSyncWithDelay ? "3000" : "0"}
                     />
                     <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">MS</span>
                   </div>
+
+                  {!typingSyncWithDelay && (
+                    <div className="relative">
+                      <input 
+                        type="number" min="0" step="100"
+                        value={typingMs} onChange={(e) => setTypingMs(e.target.value)} 
+                        className="w-full pl-4 pr-12 py-3.5 rounded-xl bg-[#f0f4f9] border-none font-medium text-slate-800 outline-none focus:ring-2 focus:ring-[#c2e7ff] transition-all disabled:opacity-60" 
+                        placeholder="2000"
+                        disabled={!typingEnabled}
+                        required={typingEnabled}
+                      />
+                      <span className="absolute right-4 top-1/2 -translate-y-1/2 text-[10px] font-bold text-slate-400">MS</span>
+                    </div>
+                  )}
+
                   <p className="text-[10px] text-slate-500 font-medium ml-1 flex items-center gap-1.5">
-                    <Clock size={12} className="text-[#0b57d0]"/> 1000 ms = 1 detik. Memicu status "Sedang mengetik..." di HP tujuan.
+                    <Clock size={12} className="text-[#0b57d0]"/>
+                    {typingSyncWithDelay
+                      ? "Mode natural: typing mengikuti jeda kirim total."
+                      : "Mode advanced: typing_ms terpisah dari jeda kirim tambahan."}
                   </p>
                </div>
 
@@ -286,11 +381,32 @@ export default function AutoReply() {
             </div>
 
             <div className="space-y-2.5">
+              <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <MessageSquare size={14} className="text-[#0b57d0]" /> Template Media (Opsional)
+              </label>
+              <select
+                value={templateId}
+                onChange={(e) => setTemplateId(e.target.value)}
+                className="w-full px-4 py-3.5 rounded-xl bg-[#f0f4f9] border-none font-medium text-slate-800 outline-none focus:ring-2 focus:ring-[#c2e7ff] transition-all cursor-pointer"
+              >
+                <option value="">-- Tanpa Template (balasan teks biasa) --</option>
+                {templates.map((tpl) => (
+                  <option key={tpl.id} value={String(tpl.id)}>
+                    {tpl.name} ({tpl.message_type})
+                  </option>
+                ))}
+              </select>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Jika dipilih, bot akan mengirim media/template ini. Isi balasan teks tetap bisa dipakai sebagai caption.
+              </p>
+            </div>
+
+            <div className="space-y-2.5">
               <label className="text-xs font-bold text-slate-700 flex items-center gap-1.5"><MessageSquare size={14} className="text-[#0b57d0]" /> Konten Balasan Bot</label>
               <textarea 
                 value={replyText} onChange={(e) => setReplyText(e.target.value)} rows={5} 
                 className="w-full px-5 py-4 rounded-2xl bg-[#f0f4f9] border-none font-medium text-slate-800 outline-none focus:ring-2 focus:ring-[#c2e7ff] transition-all resize-none text-sm leading-relaxed" 
-                placeholder="Ketik balasan Anda. Gunakan {{nama}} untuk menyebut nama pelanggan." required 
+                placeholder="Ketik balasan teks (opsional jika template media dipilih)." 
               />
             </div>
 
@@ -346,9 +462,31 @@ export default function AutoReply() {
                              <div className="px-2.5 py-1 bg-slate-100 text-[9px] font-bold text-slate-600 uppercase tracking-wider rounded border border-slate-200">
                                {matchTypeMap[rule.match_type]}
                              </div>
-                             <div className="px-2.5 py-1 bg-[#f0f4f9] text-[9px] font-bold text-[#0b57d0] uppercase tracking-wider rounded border border-[#c2e7ff] flex items-center gap-1">
-                               <Clock size={10} /> {(rule.delay_ms || 2000) / 1000} Dtk
-                             </div>
+                             {rule.typing_enabled !== false && (
+                              <div className="px-2.5 py-1 bg-[#f0f4f9] text-[9px] font-bold text-[#0b57d0] uppercase tracking-wider rounded border border-[#c2e7ff] flex items-center gap-1">
+                                <Clock size={10} /> Typing {getTypingDurationMs(rule) / 1000} Dtk
+                              </div>
+                             )}
+                             {rule.typing_enabled !== false && isTypingSynced(rule) && (
+                              <div className="px-2.5 py-1 bg-emerald-50 text-[9px] font-bold text-emerald-700 uppercase tracking-wider rounded border border-emerald-100">
+                                Natural Sync
+                              </div>
+                             )}
+                             {getExtraDelayMs(rule) > 0 && rule.typing_enabled !== false && (
+                              <div className="px-2.5 py-1 bg-slate-100 text-[9px] font-bold text-slate-600 uppercase tracking-wider rounded border border-slate-200">
+                                Delay +{getExtraDelayMs(rule) / 1000} Dtk
+                              </div>
+                             )}
+                             {rule.typing_enabled === false && (
+                              <div className="px-2.5 py-1 bg-rose-50 text-[9px] font-bold text-rose-600 uppercase tracking-wider rounded border border-rose-100">
+                                Typing OFF
+                              </div>
+                             )}
+                             {rule.template_name && (
+                              <div className="px-2.5 py-1 bg-emerald-50 text-[9px] font-bold text-emerald-700 uppercase tracking-wider rounded border border-emerald-100">
+                                Template: {rule.template_name} ({rule.template_type || "media"})
+                              </div>
+                             )}
                            </div>
                            
                            {/* Multi-Keyword Badge Rendering */}
@@ -368,7 +506,7 @@ export default function AutoReply() {
                         <td className="px-6 py-4">
                            <div className="max-w-sm p-3.5 rounded-2xl bg-[#f0f4f9] text-sm font-medium text-slate-700 leading-relaxed line-clamp-3 relative">
                               <div className="absolute -left-1 top-4 w-2 h-2 bg-[#f0f4f9] rotate-45 border-l border-t border-transparent"></div>
-                              {rule.reply_text}
+                              {rule.reply_text || (rule.template_name ? `[Template] ${rule.template_name}` : "-")}
                            </div>
                         </td>
                         
@@ -417,6 +555,11 @@ export default function AutoReply() {
                         <div className="px-2 py-0.5 bg-slate-100 text-[9px] font-bold text-slate-600 uppercase tracking-wider rounded border border-slate-200">
                           {matchTypeMap[rule.match_type]}
                         </div>
+                        {rule.template_name && (
+                          <div className="px-2 py-0.5 bg-emerald-50 text-[9px] font-bold text-emerald-700 uppercase tracking-wider rounded border border-emerald-100">
+                            {rule.template_name}
+                          </div>
+                        )}
                       </div>
                       
                       <button 
@@ -440,12 +583,13 @@ export default function AutoReply() {
                     </div>
 
                     <div className="p-3 rounded-xl bg-[#f0f4f9] text-sm font-medium text-slate-700 leading-relaxed border border-transparent">
-                      {rule.reply_text}
+                      {rule.reply_text || (rule.template_name ? `[Template] ${rule.template_name}` : "-")}
                     </div>
 
                     <div className="flex items-center justify-between mt-1 pt-3 border-t border-slate-50">
                        <div className="px-2 py-1 bg-slate-50 text-[10px] font-bold text-slate-500 uppercase tracking-wider rounded border border-slate-200 flex items-center gap-1.5">
-                         <Clock size={12} className="text-[#0b57d0]" /> Jeda {(rule.delay_ms || 2000) / 1000} Dtk
+                         <Clock size={12} className="text-[#0b57d0]" />
+                         {rule.typing_enabled === false ? "Typing OFF" : `Typing ${getTypingDurationMs(rule) / 1000} Dtk`}
                        </div>
                        <div className="flex gap-2">
                          <button onClick={() => openEditForm(rule)} className="p-2 rounded-full bg-[#f0f4f9] text-[#0b57d0]"><Edit3 size={14}/></button>

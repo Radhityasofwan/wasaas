@@ -19,6 +19,12 @@ const setApiKey = (key: string) => {
   }
 };
 
+const markPostLoginHints = () => {
+  if (typeof window === "undefined") return;
+  localStorage.setItem("wasaas:just-logged-in", "1");
+  localStorage.setItem("wasaas:show-install-capsule", "1");
+};
+
 export default function Login() {
   const nav = useNavigate();
   const [loginMode, setLoginMode] = useState<'email' | 'apikey'>('email');
@@ -31,6 +37,93 @@ export default function Login() {
   // State UI
   const [err, setErr] = useState<string | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
+
+  const parseResponseBody = async (res: Response) => {
+    const raw = await res.text();
+    if (!raw) return {};
+
+    try {
+      return JSON.parse(raw);
+    } catch {
+      return { error: raw };
+    }
+  };
+
+  const buildLoginCandidates = () => {
+    const out: string[] = [];
+
+    const configuredApiBase = String((import.meta as any)?.env?.VITE_API_BASE_URL || "").trim().replace(/\/+$/, "");
+    if (configuredApiBase) {
+      if (configuredApiBase.endsWith("/api")) {
+        out.push(`${configuredApiBase}/auth/login`);
+        out.push(`${configuredApiBase}/login`);
+      } else {
+        out.push(`${configuredApiBase}/api/auth/login`);
+        out.push(`${configuredApiBase}/api/login`);
+      }
+    }
+
+    if (typeof window !== "undefined") {
+      const host = String(window.location.hostname || "").toLowerCase();
+      const isLocalHost = host === "localhost" || host === "127.0.0.1";
+      if (isLocalHost && window.location.port !== "3001") {
+        out.push("http://localhost:3001/api/auth/login");
+        out.push("http://localhost:3001/api/login");
+      }
+    }
+
+    out.push("/api/auth/login");
+    out.push("/api/login");
+
+    return Array.from(new Set(out));
+  };
+
+  const requestLogin = async (emailInput: string, passwordInput: string) => {
+    const candidates = buildLoginCandidates();
+
+    let notFoundCount = 0;
+    let lastNetworkError = "";
+
+    for (const endpoint of candidates) {
+      let res: Response;
+      try {
+        res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+          },
+          body: JSON.stringify({ email: emailInput, password: passwordInput })
+        });
+      } catch (err: any) {
+        lastNetworkError = String(err?.message || err || "network_error");
+        continue;
+      }
+
+      const data = await parseResponseBody(res);
+
+      if (res.status === 404) {
+        notFoundCount += 1;
+        continue;
+      }
+
+      if (!res.ok) {
+        throw new Error(data?.error || `Login gagal (${res.status})`);
+      }
+
+      return data;
+    }
+
+    if (notFoundCount === candidates.length) {
+      throw new Error("Endpoint login tidak ditemukan (404). Pastikan API server aktif.");
+    }
+
+    if (lastNetworkError) {
+      throw new Error(`Gagal terhubung ke server login: ${lastNetworkError}`);
+    }
+
+    throw new Error("Login gagal.");
+  };
 
   const handleLogin = async () => {
     try {
@@ -46,6 +139,7 @@ export default function Login() {
         }
         
         setApiKey(cleanKey);
+        markPostLoginHints();
         setTimeout(() => nav("/"), 600);
         
       } else {
@@ -54,18 +148,7 @@ export default function Login() {
           throw new Error("Email dan Password wajib diisi.");
         }
 
-        // FIX: Ubah ke /api/auth/login agar sama persis dengan router resmi backend yang mengembalikan 200 OK
-        const res = await fetch("/api/auth/login", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password })
-        });
-
-        const data = await res.json();
-        
-        if (!res.ok) {
-          throw new Error(data?.error || "Email atau password salah.");
-        }
+        const data = await requestLogin(email, password);
 
         // Asumsi backend mengembalikan token dalam properti `apiKey` atau `token`
         const receivedKey = data.apiKey || data.token;
@@ -74,6 +157,7 @@ export default function Login() {
         }
 
         setApiKey(receivedKey);
+        markPostLoginHints();
         setTimeout(() => nav("/"), 600);
       }
       

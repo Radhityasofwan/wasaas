@@ -49,7 +49,15 @@ const formatETA = (remainingTargets: number, delayMs: number) => {
 
 // ===== TYPES =====
 type SessionRow = { session_key: string; status: string };
-type TemplateRow = { id: number; name: string; message_type: string; text_body: string; media_url: string };
+type TemplateRow = {
+  id: number;
+  name: string;
+  message_type: string;
+  text_body: string;
+  media_url: string;
+  media_mime?: string | null;
+  media_name?: string | null;
+};
 type JobRow = {
   id: number;
   session_key: string;
@@ -58,6 +66,10 @@ type JobRow = {
   total_targets: number;
   sent_count: number;
   failed_count: number;
+  distinct_target_count?: number;
+  primary_target_number?: string | null;
+  grouped_job_ids?: number[];
+  grouped_jobs_count?: number;
   text_body?: string;
   updated_at: string;
 };
@@ -66,6 +78,7 @@ type BroadcastItem = {
   last_error?: string | null;
 id: number;
   to_number: string;
+  duplicate_count?: number;
   status: string;
   reply_status: string;
   reply_text: string | null;
@@ -84,10 +97,12 @@ export default function Broadcast() {
   const [targetsText, setTargetsText] = useState("");
   const [text, setText] = useState("");
   const [delayMs, setDelayMs] = useState("1200");
-  const [msgType, setMsgType] = useState<'text' | 'image' | 'document'>('text');
+  const [msgType, setMsgType] = useState<'text' | 'image' | 'video' | 'audio' | 'voice_note' | 'document' | 'sticker' | 'location'>('text');
   const [scheduleDate, setScheduleDate] = useState("");
   
   const [templateId, setTemplateId] = useState("");
+  const [mediaFile, setMediaFile] = useState<File | null>(null);
+  const [locationCoord, setLocationCoord] = useState("");
 
   const [err, setErr] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
@@ -103,8 +118,62 @@ export default function Broadcast() {
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [selectedJobs, setSelectedJobs] = useState<number[]>([]);
 
+  const normalizePhone = (v: string) => v.replace(/[+\s\-()]/g, "").trim();
+  const statusRank: Record<string, number> = {
+    running: 5,
+    queued: 4,
+    paused: 3,
+    done: 2,
+    canceled: 1,
+    failed: 0
+  };
+
+  const pickDominantStatus = (a: string, b: string) => {
+    const ra = statusRank[a] ?? -1;
+    const rb = statusRank[b] ?? -1;
+    return rb > ra ? b : a;
+  };
+
   const targets = useMemo(() => targetsText.split(/[\n,;]/).map(s => s.trim()).filter(Boolean), [targetsText]);
-  const filteredJobs = useMemo(() => historyFilter === "all" ? jobs : jobs.filter(j => j.status === historyFilter), [jobs, historyFilter]);
+  const groupedJobs = useMemo(() => {
+    const groups = new Map<string, JobRow>();
+
+    for (const job of jobs) {
+      const canGroupByNumber = (job.distinct_target_count || 0) === 1 && !!job.primary_target_number;
+      const groupKey = canGroupByNumber ? normalizePhone(job.primary_target_number as string) : `job:${job.id}`;
+      const existing = groups.get(groupKey);
+
+      if (!existing) {
+        groups.set(groupKey, {
+          ...job,
+          grouped_job_ids: [job.id],
+          grouped_jobs_count: 1
+        });
+        continue;
+      }
+
+      const existingUpdated = new Date(existing.updated_at).getTime() || 0;
+      const currentUpdated = new Date(job.updated_at).getTime() || 0;
+      const latest = currentUpdated >= existingUpdated ? job : existing;
+
+      groups.set(groupKey, {
+        ...latest,
+        status: pickDominantStatus(existing.status, job.status),
+        total_targets: (existing.total_targets || 0) + (job.total_targets || 0),
+        sent_count: (existing.sent_count || 0) + (job.sent_count || 0),
+        failed_count: (existing.failed_count || 0) + (job.failed_count || 0),
+        grouped_job_ids: Array.from(new Set([...(existing.grouped_job_ids || [existing.id]), job.id])),
+        grouped_jobs_count: (existing.grouped_jobs_count || 1) + 1
+      });
+    }
+
+    return Array.from(groups.values()).sort((a, b) => b.id - a.id);
+  }, [jobs]);
+
+  const filteredJobs = useMemo(
+    () => historyFilter === "all" ? groupedJobs : groupedJobs.filter(j => j.status === historyFilter),
+    [groupedJobs, historyFilter]
+  );
   const filteredItems = useMemo(() => {
     if (itemFilter === "replied") return jobItems.filter(i => i.reply_status === "replied");
     if (itemFilter === "failed") return jobItems.filter(i => i.status === "failed");
@@ -179,9 +248,16 @@ export default function Broadcast() {
     if (!sessionKey) return setErr("Silakan pilih sesi WA pengirim terlebih dahulu.");
     if (!targets.length) return setErr("Daftar nomor target kosong. Harap isi minimal 1 nomor.");
     if (!text.trim() && msgType === 'text') return setErr("Konten pesan tidak boleh kosong.");
+    const selectedTemplate = templates.find(t => t.id === Number(templateId));
+    const templateMediaUrl = String(selectedTemplate?.media_url || "").trim();
 
-    if (msgType !== 'text') {
-       return setInfo("Fitur pengiriman Media sedang dalam tahap integrasi backend. Silakan gunakan Teks untuk saat ini.");
+    if (msgType !== "text" && msgType !== "location" && !mediaFile && !templateMediaUrl) {
+      return setErr("Untuk broadcast media, upload file atau pilih template yang memiliki media.");
+    }
+
+    const locationValue = String(locationCoord || templateMediaUrl || "").trim();
+    if (msgType === "location" && !locationValue) {
+      return setErr("Isi koordinat lokasi (lat,lng) atau pilih template lokasi.");
     }
 
     const isConfirmed = await confirm({
@@ -193,38 +269,84 @@ export default function Broadcast() {
     if (!isConfirmed) return;
 
     try {
-      await apiFetch<any>("broadcast/create", {
-        method: "POST",
-        body: JSON.stringify({ 
-          sessionKey, 
-          text: text.trim(), 
-          targets, 
-          delayMs: Number(delayMs),
-          msgType: msgType,
-          scheduledAt: scheduleDate ? new Date(scheduleDate).toISOString() : undefined
-        }),
-      });
+      const basePayload = {
+        sessionKey,
+        text: text.trim(),
+        targets,
+        delayMs: Number(delayMs),
+        msgType,
+        templateId: templateId ? Number(templateId) : undefined,
+        mediaUrl: msgType === "location" ? locationValue : (templateMediaUrl || undefined),
+        scheduledAt: scheduleDate || undefined
+      };
+
+      if (mediaFile) {
+        const body = new FormData();
+        body.append("sessionKey", sessionKey);
+        body.append("text", text.trim());
+        body.append("targets", JSON.stringify(targets));
+        body.append("delayMs", String(Number(delayMs)));
+        body.append("msgType", msgType);
+        if (templateId) body.append("templateId", String(Number(templateId)));
+        if (scheduleDate) body.append("scheduledAt", scheduleDate);
+        body.append("file", mediaFile);
+        await apiFetch<any>("broadcast/create", { method: "POST", body });
+      } else {
+        await apiFetch<any>("broadcast/create", {
+          method: "POST",
+          body: JSON.stringify(basePayload),
+        });
+      }
+
       setInfo(scheduleDate ? "Kampanye broadcast berhasil dijadwalkan!" : "Kampanye pesan massal berhasil ditambahkan ke antrean!");
       setTargetsText(""); 
       setText(""); 
       setTemplateId("");
+      setMediaFile(null);
+      setLocationCoord("");
       loadJobsOnly();
     } catch (e: any) { 
       setErr(e.message || "Gagal menjadwalkan broadcast."); 
     }
   }
 
-  async function togglePause(id: number, currentStatus: string) {
+  function useCurrentDeviceLocationForBroadcast() {
+    if (!navigator.geolocation) {
+      setErr("Browser ini tidak mendukung geolocation.");
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const lat = String(pos.coords.latitude);
+        const lng = String(pos.coords.longitude);
+        setLocationCoord(`${lat},${lng}`);
+        try {
+          window.open(`https://www.google.com/maps?q=${lat},${lng}`, "_blank", "noopener,noreferrer");
+        } catch {
+          // ignore
+        }
+      },
+      (error) => {
+        setErr(`Gagal mengambil lokasi perangkat: ${error.message}`);
+      },
+      { enableHighAccuracy: true, timeout: 12000, maximumAge: 0 }
+    );
+  }
+
+  async function togglePause(job: JobRow) {
+    const ids = job.grouped_job_ids?.length ? job.grouped_job_ids : [job.id];
+    const currentStatus = job.status;
     const action = currentStatus === 'paused' ? 'resume' : 'pause';
     try { 
-      await apiFetch(`broadcast/${id}/${action}`, { method: "POST" }); 
+      await Promise.all(ids.map(id => apiFetch(`broadcast/${id}/${action}`, { method: "POST" })));
       loadJobsOnly(); 
     } catch (e: any) { 
       setErr(`Fitur ${action} membutuhkan pembaruan rute di backend Anda.`); 
     }
   }
 
-  async function cancelJob(id: number) {
+  async function cancelJob(job: JobRow) {
     const isConfirmed = await confirm({
       title: "Hentikan Job",
       message: "Hentikan pengiriman broadcast ini secara permanen?",
@@ -234,11 +356,15 @@ export default function Broadcast() {
     
     if (!isConfirmed) return;
 
-    try { await apiFetch(`broadcast/${id}/cancel`, { method: "POST" }); loadJobsOnly(); } 
+    try {
+      const ids = job.grouped_job_ids?.length ? job.grouped_job_ids : [job.id];
+      await Promise.all(ids.map(id => apiFetch(`broadcast/${id}/cancel`, { method: "POST" })));
+      loadJobsOnly();
+    } 
     catch (e: any) { setErr(e.message); }
   }
 
-  async function deleteJob(id: number) {
+  async function deleteJob(job: JobRow) {
     const isConfirmed = await confirm({
       title: "Hapus Riwayat",
       message: "Hapus data riwayat ini dari database secara permanen?",
@@ -248,7 +374,11 @@ export default function Broadcast() {
 
     if (!isConfirmed) return;
 
-    try { await apiFetch(`broadcast/${id}`, { method: "DELETE" }); setJobs(p => p.filter(j => j.id !== id)); } 
+    try {
+      const ids = job.grouped_job_ids?.length ? job.grouped_job_ids : [job.id];
+      await Promise.all(ids.map(id => apiFetch(`broadcast/${id}`, { method: "DELETE" })));
+      setJobs(p => p.filter(j => !ids.includes(j.id)));
+    } 
     catch (e: any) { setErr(e.message); }
   }
 
@@ -257,9 +387,14 @@ export default function Broadcast() {
   };
 
   async function executeBulkDeleteJobs() {
+    const groupedMap = new Map<number, number[]>(
+      filteredJobs.map(j => [j.id, j.grouped_job_ids?.length ? j.grouped_job_ids : [j.id]])
+    );
+    const idsToDelete = Array.from(new Set(selectedJobs.flatMap(id => groupedMap.get(id) || [id])));
+
     const isConfirmed = await confirm({
       title: "Hapus Massal",
-      message: `Hapus permanen ${selectedJobs.length} riwayat broadcast beserta antrean targetnya?`,
+      message: `Hapus permanen ${idsToDelete.length} riwayat broadcast beserta antrean targetnya?`,
       confirmText: "Hapus Massal",
       isDanger: true
     });
@@ -267,23 +402,83 @@ export default function Broadcast() {
     if (!isConfirmed) return;
 
     try {
-      await Promise.all(selectedJobs.map(id => apiFetch(`broadcast/${id}`, { method: "DELETE" })));
+      await Promise.all(idsToDelete.map(id => apiFetch(`broadcast/${id}`, { method: "DELETE" })));
       setSelectedJobs([]);
       setIsSelectionMode(false);
       loadJobsOnly();
-      setInfo(`${selectedJobs.length} Riwayat berhasil dihapus.`);
+      setInfo(`${idsToDelete.length} Riwayat berhasil dihapus.`);
     } catch (e: any) {
       setErr("Gagal menghapus beberapa riwayat: " + e.message);
     }
   }
 
-  async function openDetail(job: JobRow) {
-    setViewJob(job); setJobItems([]); setItemFilter("all"); setLoadingItems(true);
+  async function loadDetailItems(job: JobRow, silent = false) {
+    if (!silent) setLoadingItems(true);
     try {
-      const itemsRes = await apiFetch<any>(`broadcast/${job.id}/items?limit=500`);
-      setJobItems(itemsRes.data || []);
-    } catch {} finally { setLoadingItems(false); }
+      const ids = job.grouped_job_ids?.length ? job.grouped_job_ids : [job.id];
+      const responses = await Promise.all(ids.map(id => apiFetch<any>(`broadcast/${id}/items?limit=500`)));
+      const allItems = responses.flatMap(r => r.data || []);
+
+      const byNumber = new Map<string, BroadcastItem>();
+      const score = (it: BroadcastItem) => {
+        if (it.reply_status === "replied") return 5;
+        if (it.status === "read") return 4;
+        if (it.status === "delivered") return 3;
+        if (it.status === "sent") return 2;
+        if (it.status === "sending") return 1;
+        if (it.status === "failed") return 0;
+        return -1;
+      };
+      const asTime = (v: string | null) => (v ? new Date(v).getTime() || 0 : 0);
+
+      for (const item of allItems) {
+        const key = normalizePhone(item.to_number || "");
+        const prev = byNumber.get(key);
+        if (!prev) {
+          byNumber.set(key, { ...item, duplicate_count: item.duplicate_count || 1 });
+          continue;
+        }
+        let chosen = score(item) > score(prev) ? item : prev;
+
+        // Untuk nomor yang sudah membalas, tampilkan balasan pertama (paling awal).
+        if (item.reply_status === "replied" && prev.reply_status === "replied") {
+          const itemTime = asTime(item.reply_received_at || item.sent_at);
+          const prevTime = asTime(prev.reply_received_at || prev.sent_at);
+          chosen = itemTime > 0 && prevTime > 0
+            ? (itemTime < prevTime ? item : prev)
+            : (item.id < prev.id ? item : prev);
+        }
+
+        if (item.reply_status === "replied" && prev.reply_status !== "replied") chosen = item;
+        byNumber.set(key, {
+          ...chosen,
+          duplicate_count: (prev.duplicate_count || 1) + (item.duplicate_count || 1)
+        });
+      }
+
+      setJobItems(Array.from(byNumber.values()).sort((a, b) => a.id - b.id));
+    } catch (e: any) {
+      setErr(e?.message || "Gagal memuat laporan detail broadcast.");
+    } finally {
+      if (!silent) setLoadingItems(false);
+    }
   }
+
+  async function openDetail(job: JobRow) {
+    setErr(null);
+    setViewJob(job);
+    setJobItems([]);
+    setItemFilter("all");
+    await loadDetailItems(job, false);
+  }
+
+  useEffect(() => {
+    if (!viewJob) return;
+    const t = setInterval(() => {
+      loadDetailItems(viewJob, true).catch(() => {});
+    }, 3000);
+    return () => clearInterval(t);
+  }, [viewJob?.id]);
 
   return (
     <div className="max-w-7xl mx-auto space-y-6 md:space-y-8 animate-in fade-in duration-500 pb-20 relative">
@@ -319,10 +514,27 @@ export default function Broadcast() {
       <div className="bg-white border border-slate-100 rounded-3xl p-5 md:p-8 shadow-sm">
         
         {/* TABS TIPE PESAN */}
-        <div className="flex gap-2 mb-6 bg-[#f0f4f9] p-1.5 rounded-2xl w-fit">
-           <button onClick={() => setMsgType('text')} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${msgType === 'text' ? 'bg-white text-[#0b57d0] shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}><Type size={16} /> Teks</button>
-           <button onClick={() => setMsgType('image')} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${msgType === 'image' ? 'bg-white text-[#0b57d0] shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}><ImageIcon size={16} /> Gambar</button>
-           <button onClick={() => setMsgType('document')} className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-bold transition-all ${msgType === 'document' ? 'bg-white text-[#0b57d0] shadow-sm' : 'text-slate-500 hover:text-slate-800'}`}><FileText size={16} /> Dokumen</button>
+        <div className="flex flex-wrap gap-2 mb-6 bg-[#f0f4f9] p-1.5 rounded-2xl w-fit">
+          {[
+            { id: "text", label: "Teks", icon: <Type size={16} /> },
+            { id: "image", label: "Gambar", icon: <ImageIcon size={16} /> },
+            { id: "video", label: "Video", icon: <Type size={16} /> },
+            { id: "audio", label: "Audio", icon: <Type size={16} /> },
+            { id: "voice_note", label: "Voice Note", icon: <Type size={16} /> },
+            { id: "document", label: "Dokumen", icon: <FileText size={16} /> },
+            { id: "sticker", label: "Sticker", icon: <Type size={16} /> },
+            { id: "location", label: "Lokasi", icon: <Clock size={16} /> },
+          ].map(opt => (
+            <button
+              key={opt.id}
+              onClick={() => { setMsgType(opt.id as any); setMediaFile(null); }}
+              className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs font-bold transition-all ${
+                msgType === opt.id ? "bg-white text-[#0b57d0] shadow-sm" : "text-slate-500 hover:text-slate-800"
+              }`}
+            >
+              {opt.icon} {opt.label}
+            </button>
+          ))}
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">
@@ -367,6 +579,8 @@ export default function Broadcast() {
                     if(tpl) {
                        setMsgType(tpl.message_type as any);
                        setText(tpl.text_body || "");
+                       setLocationCoord(tpl.message_type === "location" ? String(tpl.media_url || "") : "");
+                       setMediaFile(null);
                     }
                  }}
                >
@@ -375,13 +589,47 @@ export default function Broadcast() {
                </select>
              </div>
 
-             {msgType !== 'text' && (
-                <div className="w-full border-2 border-dashed border-slate-300 rounded-2xl p-6 text-center hover:bg-[#f0f4f9] transition-colors cursor-pointer bg-white">
+             {msgType !== 'text' && msgType !== 'location' && (
+                <label className="w-full border-2 border-dashed border-slate-300 rounded-2xl p-6 text-center hover:bg-[#f0f4f9] transition-colors cursor-pointer bg-white block">
+                   <input
+                     type="file"
+                     className="hidden"
+                     accept={
+                       msgType === "image" ? "image/*" :
+                       msgType === "video" ? "video/*" :
+                       msgType === "audio" || msgType === "voice_note" ? "audio/*" :
+                       msgType === "sticker" ? ".webp,image/webp" :
+                       "*/*"
+                     }
+                     onChange={(e) => setMediaFile(e.target.files?.[0] || null)}
+                   />
                    <div className="w-12 h-12 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-3 text-slate-400">
                       {msgType === 'image' ? <ImageIcon size={24} /> : <FileText size={24} />}
                    </div>
-                   <p className="text-sm font-bold text-slate-600">Klik untuk unggah {msgType === 'image' ? 'Gambar' : 'Dokumen'}</p>
-                </div>
+                   <p className="text-sm font-bold text-slate-600">
+                     {mediaFile ? mediaFile.name : `Klik untuk unggah ${msgType.replace("_", " ")}`}
+                   </p>
+                   <p className="text-xs text-slate-500 mt-1">Atau gunakan template yang sudah punya media.</p>
+                </label>
+             )}
+
+             {msgType === "location" && (
+               <div className="space-y-2">
+                 <label className="text-xs font-bold text-slate-700">Koordinat Lokasi (lat,lng)</label>
+                 <input
+                   value={locationCoord}
+                   onChange={(e) => setLocationCoord(e.target.value)}
+                   placeholder="-6.200000,106.816666"
+                   className="w-full px-4 py-3 rounded-xl bg-white border border-slate-200 text-sm font-medium text-slate-700 outline-none focus:ring-2 focus:ring-[#c2e7ff]"
+                 />
+                 <button
+                   type="button"
+                   onClick={useCurrentDeviceLocationForBroadcast}
+                   className="w-full px-4 py-2.5 rounded-xl border border-slate-200 text-xs font-bold text-[#0b57d0] hover:bg-[#f0f4f9]"
+                 >
+                   Gunakan Lokasi Perangkat & Buka Maps
+                 </button>
+               </div>
              )}
 
              <div className="flex-1 flex flex-col">
@@ -495,7 +743,14 @@ export default function Broadcast() {
                   )}
                   
                   <td className="px-6 py-4">
-                    <div className="font-bold text-slate-800 text-sm mb-1.5">{j.session_key}</div>
+                    <div className="flex items-center gap-2 mb-1.5">
+                      <div className="font-bold text-slate-800 text-sm">{j.session_key}</div>
+                      {(j.grouped_jobs_count || 1) > 1 && (
+                        <span className="px-2 py-0.5 rounded-full bg-[#e9eef6] text-[#0b57d0] text-[10px] font-bold border border-[#c2e7ff]">
+                          {j.grouped_jobs_count}x nomor sama
+                        </span>
+                      )}
+                    </div>
                     <span className={`px-2.5 py-1 rounded text-[10px] font-bold uppercase tracking-wider border ${
                       j.status === 'done' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
                       j.status === 'running' ? 'bg-[#e9eef6] text-[#0b57d0] border-[#c2e7ff] animate-pulse' :
@@ -533,16 +788,16 @@ export default function Broadcast() {
                       <button onClick={() => openDetail(j)} className="w-8 h-8 rounded-full bg-white text-[#0b57d0] flex items-center justify-center hover:bg-[#e9eef6] border border-slate-200 transition-colors" title="Lihat Detail"><Eye size={16}/></button>
                       
                       {isRunning && (
-                        <button onClick={() => togglePause(j.id, j.status)} className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center hover:bg-amber-100 border border-amber-200 transition-colors" title="Jeda"><Pause size={16}/></button>
+                        <button onClick={() => togglePause(j)} className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center hover:bg-amber-100 border border-amber-200 transition-colors" title="Jeda"><Pause size={16}/></button>
                       )}
                       {j.status === 'paused' && (
-                        <button onClick={() => togglePause(j.id, j.status)} className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 border border-emerald-200 transition-colors" title="Lanjutkan"><Play size={16}/></button>
+                        <button onClick={() => togglePause(j)} className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center hover:bg-emerald-100 border border-emerald-200 transition-colors" title="Lanjutkan"><Play size={16}/></button>
                       )}
                       {(j.status === "running" || j.status === "queued" || j.status === "paused") && (
-                        <button onClick={() => cancelJob(j.id)} className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-100 border border-rose-200 transition-colors" title="Batalkan"><Square size={16}/></button>
+                        <button onClick={() => cancelJob(j)} className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center hover:bg-rose-100 border border-rose-200 transition-colors" title="Batalkan"><Square size={16}/></button>
                       )}
                       
-                      <button onClick={() => deleteJob(j.id)} className="w-8 h-8 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 border border-slate-200 transition-colors" title="Hapus Permanen"><Trash2 size={16}/></button>
+                      <button onClick={() => deleteJob(j)} className="w-8 h-8 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center hover:bg-rose-50 hover:text-rose-500 border border-slate-200 transition-colors" title="Hapus Permanen"><Trash2 size={16}/></button>
                     </div>
                   </td>
                 </tr>
@@ -574,7 +829,14 @@ export default function Broadcast() {
                       </div>
                     )}
                     <div>
-                      <div className="font-bold text-slate-800 text-sm">{j.session_key}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="font-bold text-slate-800 text-sm">{j.session_key}</div>
+                        {(j.grouped_jobs_count || 1) > 1 && (
+                          <span className="px-2 py-0.5 rounded-full bg-[#e9eef6] text-[#0b57d0] text-[9px] font-bold border border-[#c2e7ff]">
+                            {j.grouped_jobs_count}x
+                          </span>
+                        )}
+                      </div>
                       <span className={`inline-block mt-1 px-2 py-0.5 rounded text-[9px] font-bold uppercase tracking-wider border ${
                         j.status === 'done' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
                         j.status === 'running' ? 'bg-[#e9eef6] text-[#0b57d0] border-[#c2e7ff] animate-pulse' :
@@ -607,15 +869,15 @@ export default function Broadcast() {
                 <div className="flex justify-end gap-2 mt-1">
                     <button onClick={() => openDetail(j)} className="w-8 h-8 rounded-full bg-white text-[#0b57d0] flex items-center justify-center border border-slate-200 shadow-sm" title="Lihat Detail"><Eye size={14}/></button>
                     {isRunning && (
-                      <button onClick={() => togglePause(j.id, j.status)} className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shadow-sm"><Pause size={14}/></button>
+                      <button onClick={() => togglePause(j)} className="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center border border-amber-200 shadow-sm"><Pause size={14}/></button>
                     )}
                     {j.status === 'paused' && (
-                      <button onClick={() => togglePause(j.id, j.status)} className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200 shadow-sm"><Play size={14}/></button>
+                      <button onClick={() => togglePause(j)} className="w-8 h-8 rounded-full bg-emerald-50 text-emerald-600 flex items-center justify-center border border-emerald-200 shadow-sm"><Play size={14}/></button>
                     )}
                     {(j.status === "running" || j.status === "queued" || j.status === "paused") && (
-                      <button onClick={() => cancelJob(j.id)} className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center border border-rose-200 shadow-sm"><Square size={14}/></button>
+                      <button onClick={() => cancelJob(j)} className="w-8 h-8 rounded-full bg-rose-50 text-rose-500 flex items-center justify-center border border-rose-200 shadow-sm"><Square size={14}/></button>
                     )}
-                    <button onClick={() => deleteJob(j.id)} className="w-8 h-8 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center border border-slate-200 shadow-sm"><Trash2 size={14}/></button>
+                    <button onClick={() => deleteJob(j)} className="w-8 h-8 rounded-full bg-slate-50 text-slate-500 flex items-center justify-center border border-slate-200 shadow-sm"><Trash2 size={14}/></button>
                 </div>
               </div>
              )
@@ -680,9 +942,21 @@ export default function Broadcast() {
                        )}
                        {filteredItems.map(item => (
                          <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
-                           <td className="py-3 px-5 font-mono text-sm font-bold text-slate-700">{item.to_number}</td>
+                           <td className="py-3 px-5">
+                              <div className="flex items-center gap-2">
+                                <span className="font-mono text-sm font-bold text-slate-700">{item.to_number}</span>
+                                {(item.duplicate_count || 1) > 1 && (
+                                  <span className="px-2 py-0.5 rounded-full bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold uppercase tracking-wider">
+                                    {item.duplicate_count}x grouped
+                                  </span>
+                                )}
+                              </div>
+                           </td>
                            <td className="py-3 px-5">
                               <span className={`flex items-center gap-1.5 px-2.5 py-1 w-fit rounded text-[10px] font-bold uppercase tracking-wider border ${
+                                item.status === 'replied' ? 'bg-violet-50 text-violet-700 border-violet-200' :
+                                item.status === 'read' ? 'bg-sky-50 text-sky-700 border-sky-200' :
+                                item.status === 'delivered' ? 'bg-indigo-50 text-indigo-700 border-indigo-200' :
                                 item.status === 'sent' ? 'bg-emerald-50 text-emerald-600 border-emerald-100' : 
                                 item.status === 'failed' ? 'bg-rose-50 text-rose-600 border-rose-100' :
                                 'bg-[#f0f4f9] text-slate-500 border-slate-200'

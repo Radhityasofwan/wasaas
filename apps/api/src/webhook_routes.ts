@@ -68,7 +68,16 @@ export async function setWebhook(req: any, res: any) {
 
     const events = parsed.data.events?.length
       ? parsed.data.events
-      : ["message.incoming", "message.status", "session.update", "broadcast.status"];
+      : [
+          "message.incoming",
+          "message.status",
+          "session.update",
+          "broadcast.status",
+          "broadcast.reply",
+          "followup.sent",
+          "followup.replied",
+          "lead.created"
+        ];
 
     // reuse secret if same url exists for tenant
     const [exist] = await pool.query<any[]>(

@@ -9,14 +9,18 @@ import fs from "fs";
 import { z } from "zod";
 
 import { migrate, pool } from "./db";
-import { bootSessions, enforceMessageLimitMw, enforceSessionLimitMw } from "./boot";
+import { bootSessions, enforceBroadcastLimitMw, enforceMessageLimitMw, enforceSessionLimitMw } from "./boot";
 
 import { apiKeyAuth } from "./auth";
 import { requireSessionOwned } from "./session_guard";
 
 import { startSession } from "./wa";
 import { upload, filePublicUrl } from "./upload";
-import { sendMediaImage, sendMediaDocument, sendMediaVideo, sendLocation } from "./wa_media";
+import {
+  sendMediaByType,
+  sendLocation,
+} from "./wa_media";
+import { resolveMediaAssetFromUrl } from "./media_asset_resolver";
 
 import apiKeysRoutes from "./api_keys_routes";
 import autoReplyRoutes from "./auto_reply_routes";
@@ -37,7 +41,8 @@ import { setWebhook, getWebhook } from "./webhook_routes";
 import { createBroadcast, getJob, getJobItems, deleteJob } from "./broadcast_routes";
 import { listBroadcastJobs, cancelBroadcast, pauseBroadcast, resumeBroadcast } from "./broadcast_ui_routes";
 
-import { getLeads, setLeadLabel, deleteLeads, updateLeadStatus, getTempRules, saveTempRules } from "./leads_routes";
+import { getLeads, setLeadLabel, deleteLeads, updateLeadStatus, getTempRules, saveTempRules, debugClassifyLead } from "./leads_routes";
+import { listInvalidLeadSkips } from "./invalid_leads_audit";
 
 const app = express();
 
@@ -60,6 +65,16 @@ function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
       reject(e);
     });
   });
+}
+
+type UploadMediaType = "image" | "video" | "document" | "audio" | "voice_note" | "sticker";
+
+function normalizeUploadMediaType(raw: unknown): UploadMediaType | null {
+  const t = String(raw || "").trim().toLowerCase();
+  if (t === "image" || t === "video" || t === "document" || t === "audio" || t === "voice_note" || t === "sticker") {
+    return t;
+  }
+  return null;
 }
 
 // ---------- UI dist resolver ----------
@@ -121,11 +136,19 @@ const dashboardAuthMw = (req: any, res: any, next: any) => {
     const isLocal = isLocalHost || isLoopback;
 
     if (isLocal) {
-      req.auth = { tenantId: 1, userId: 1, apiKeyId: 0 };
+      req.auth = { tenantId: 1, userId: 1, apiKeyId: 0, role: "admin", name: "Local Dev Superadmin" };
       return next();
     }
   }
   return apiKeyAuth(req, res, next);
+};
+
+const requireSuperadminMw = (req: any, res: any, next: any) => {
+  const role = String(req?.auth?.role || "").toLowerCase();
+  if (role !== "admin") {
+    return res.status(403).json({ ok: false, error: "forbidden: superadmin only" });
+  }
+  return next();
 };
 
 // ============================================================================
@@ -252,7 +275,135 @@ api.post("/messages/send", dashboardAuthMw, requireSessionOwned, enforceMessageL
   }
 });
 
+// ===== INTERACTIVE =====
+api.post("/messages/send-interactive", dashboardAuthMw, requireSessionOwned, enforceMessageLimitMw, async (req: any, res: any) => {
+  const schema = z.object({
+    sessionKey: z.string().min(3).max(64),
+    to: z.string().min(8).max(30),
+    kind: z.enum(["buttons", "quick_reply", "list", "cta", "template"]),
+    body: z.string().max(4096).optional(),
+    footer: z.string().max(256).optional(),
+    title: z.string().max(120).optional(),
+    buttonText: z.string().max(60).optional(),
+    buttons: z.array(z.string().max(60)).max(3).optional(),
+    sections: z.array(
+      z.object({
+        title: z.string().max(120).optional(),
+        rows: z.array(
+          z.object({
+            title: z.string().min(1).max(120),
+            description: z.string().max(240).optional(),
+            rowId: z.string().max(120).optional(),
+          })
+        ).min(1).max(10)
+      })
+    ).max(5).optional(),
+    ctaUrlLabel: z.string().max(60).optional(),
+    ctaUrl: z.string().max(2048).optional(),
+    ctaCallLabel: z.string().max(60).optional(),
+    ctaCallNumber: z.string().max(30).optional(),
+    templateId: z.union([z.number().int().positive(), z.string().regex(/^\d+$/)]).optional(),
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+
+  try {
+    const data = parsed.data;
+    let body = String(data.body || "").trim();
+
+    if (data.kind === "template" && !body && data.templateId) {
+      const templateId = Number(data.templateId);
+      const [rows] = await pool.query<any[]>(
+        `SELECT id, message_type, text_body
+         FROM message_templates
+         WHERE id = ? AND tenant_id = ?
+         LIMIT 1`,
+        [templateId, req.auth.tenantId]
+      );
+      if (!rows.length) {
+        return res.status(404).json({ ok: false, error: "Template tidak ditemukan." });
+      }
+      if (String(rows[0].message_type || "text") !== "text") {
+        return res.status(400).json({ ok: false, error: "Template non-text belum didukung untuk mode interactive." });
+      }
+      body = String(rows[0].text_body || "").trim();
+    }
+
+    const normalizedSections = (data.sections || []).map((section, sectionIdx) => ({
+      title: section.title || undefined,
+      rows: (section.rows || []).map((row, rowIdx) => ({
+        title: row.title,
+        description: row.description || undefined,
+        rowId: row.rowId || `row_${Date.now()}_${sectionIdx}_${rowIdx}`
+      }))
+    }));
+
+    const payload = {
+      kind: data.kind,
+      body,
+      footer: data.footer,
+      title: data.title,
+      buttonText: data.buttonText,
+      buttons: data.buttons || [],
+      sections: normalizedSections,
+      ctaUrlLabel: data.ctaUrlLabel,
+      ctaUrl: data.ctaUrl,
+      ctaCallLabel: data.ctaCallLabel,
+      ctaCallNumber: data.ctaCallNumber,
+    };
+
+    const { sendInteractive } = require("./wa");
+    const out: any = await withTimeout(
+      sendInteractive(data.sessionKey, data.to, payload),
+      12000,
+      "wa.sendInteractive"
+    );
+    if (!out?.ok) {
+      return res.status(400).json(out);
+    }
+    return res.json(out);
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || "error" });
+  }
+});
+
 api.get("/messages/send-image/ping", (_req, res) => res.json({ ok: true, route: "send-image" }));
+
+async function sendUploadedMediaHandler(req: any, res: any, mediaType: UploadMediaType) {
+  const schema = z.object({
+    sessionKey: z.string().min(3).max(64),
+    to: z.string().min(8).max(40),
+    caption: z.string().max(4096).optional(),
+  });
+
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
+  if (!req.file) return res.status(400).json({ ok: false, error: "file required" });
+
+  const mime = String(req.file.mimetype || "application/octet-stream");
+  const fileName = String(req.file.originalname || req.file.filename || "file");
+  const publicUrl = filePublicUrl(req.file.filename);
+
+  try {
+    const result = await sendMediaByType({
+      tenantId: req.auth.tenantId,
+      userId: req.auth.userId,
+      sessionKey: parsed.data.sessionKey,
+      to: parsed.data.to,
+      mediaType,
+      caption: parsed.data.caption || "",
+      filePath: req.file.path,
+      mime,
+      fileName,
+      fileSize: Number(req.file.size || 0),
+      publicUrl,
+    });
+    return res.json(result);
+  } catch (e: any) {
+    return res.status(500).json({ ok: false, error: e?.message || "error" });
+  }
+}
 
 // ===== IMAGE =====
 api.post(
@@ -261,73 +412,7 @@ api.post(
   upload.single("file"),
   requireSessionOwned,
   enforceMessageLimitMw,
-  async (req: any, res: any) => {
-    const schema = z.object({
-      sessionKey: z.string().min(3).max(64),
-      to: z.string().min(8).max(30),
-      caption: z.string().max(4096).optional(),
-    });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
-    if (!req.file) return res.status(400).json({ ok: false, error: "file required" });
-
-    try {
-      const url = filePublicUrl(req.file.filename);
-      const result = await sendMediaImage({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        sessionKey: parsed.data.sessionKey,
-        to: parsed.data.to,
-        caption: parsed.data.caption || "",
-        filePath: req.file.path,
-        mime: req.file.mimetype,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        publicUrl: url,
-      });
-      return res.json(result);
-    } catch (e: any) {
-      return res.status(500).json({ ok: false, error: e?.message || "error" });
-    }
-  }
-);
-
-// ===== DOCUMENT =====
-api.post(
-  "/messages/send-document",
-  dashboardAuthMw,
-  upload.single("file"),
-  requireSessionOwned,
-  enforceMessageLimitMw,
-  async (req: any, res: any) => {
-    const schema = z.object({
-      sessionKey: z.string().min(3).max(64),
-      to: z.string().min(8).max(30),
-      caption: z.string().max(4096).optional(),
-    });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
-    if (!req.file) return res.status(400).json({ ok: false, error: "file required" });
-
-    try {
-      const url = filePublicUrl(req.file.filename);
-      const result = await sendMediaDocument({
-        tenantId: req.auth.tenantId,
-        userId: req.auth.userId,
-        sessionKey: parsed.data.sessionKey,
-        to: parsed.data.to,
-        caption: parsed.data.caption || "",
-        filePath: req.file.path,
-        mime: req.file.mimetype,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        publicUrl: url,
-      });
-      return res.json(result);
-    } catch (e: any) {
-      return res.status(500).json({ ok: false, error: e?.message || "error" });
-    }
-  }
+  async (req: any, res: any) => sendUploadedMediaHandler(req, res, "image")
 );
 
 // ===== VIDEO =====
@@ -337,29 +422,133 @@ api.post(
   upload.single("file"),
   requireSessionOwned,
   enforceMessageLimitMw,
+  async (req: any, res: any) => sendUploadedMediaHandler(req, res, "video")
+);
+
+// ===== DOCUMENT =====
+api.post(
+  "/messages/send-document",
+  dashboardAuthMw,
+  upload.single("file"),
+  requireSessionOwned,
+  enforceMessageLimitMw,
+  async (req: any, res: any) => sendUploadedMediaHandler(req, res, "document")
+);
+
+// ===== AUDIO =====
+api.post(
+  "/messages/send-audio",
+  dashboardAuthMw,
+  upload.single("file"),
+  requireSessionOwned,
+  enforceMessageLimitMw,
+  async (req: any, res: any) => sendUploadedMediaHandler(req, res, "audio")
+);
+
+// ===== VOICE NOTE (PTT) =====
+api.post(
+  "/messages/send-voice-note",
+  dashboardAuthMw,
+  upload.single("file"),
+  requireSessionOwned,
+  enforceMessageLimitMw,
+  async (req: any, res: any) => sendUploadedMediaHandler(req, res, "voice_note")
+);
+
+// ===== STICKER =====
+api.post(
+  "/messages/send-sticker",
+  dashboardAuthMw,
+  upload.single("file"),
+  requireSessionOwned,
+  enforceMessageLimitMw,
+  async (req: any, res: any) => sendUploadedMediaHandler(req, res, "sticker")
+);
+
+// ===== GENERIC MEDIA (UPLOAD / URL / LOCATION) =====
+api.post(
+  "/messages/send-media",
+  dashboardAuthMw,
+  upload.single("file"),
+  requireSessionOwned,
+  enforceMessageLimitMw,
   async (req: any, res: any) => {
-    const schema = z.object({
-      sessionKey: z.string().min(3).max(64),
-      to: z.string().min(8).max(30),
-      caption: z.string().max(4096).optional(),
-    });
-    const parsed = schema.safeParse(req.body);
-    if (!parsed.success) return res.status(400).json({ ok: false, error: parsed.error.flatten() });
-    if (!req.file) return res.status(400).json({ ok: false, error: "file required" });
+    const body = req.body || {};
+    const sessionKey = String(body.sessionKey || "").trim();
+    const to = String(body.to || "").trim();
+    const typeRaw = String(body.type || "").trim().toLowerCase();
+    const caption = String(body.caption || "").trim();
+
+    if (!sessionKey || !to) {
+      return res.status(400).json({ ok: false, error: "sessionKey dan to wajib diisi." });
+    }
+
+    if (typeRaw === "location") {
+      const latitude = Number(body.latitude);
+      const longitude = Number(body.longitude);
+      if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        return res.status(400).json({ ok: false, error: "latitude/longitude wajib valid untuk location." });
+      }
+      try {
+        const result = await sendLocation({
+          tenantId: req.auth.tenantId,
+          userId: req.auth.userId,
+          sessionKey,
+          to,
+          latitude,
+          longitude,
+          name: body.name ? String(body.name) : undefined,
+          address: body.address ? String(body.address) : undefined,
+        });
+        return res.json(result);
+      } catch (e: any) {
+        return res.status(500).json({ ok: false, error: e?.message || "error" });
+      }
+    }
+
+    const mediaType = normalizeUploadMediaType(typeRaw);
+    if (!mediaType) {
+      return res.status(400).json({ ok: false, error: "type media tidak valid." });
+    }
 
     try {
-      const url = filePublicUrl(req.file.filename);
-      const result = await sendMediaVideo({
+      let filePath = "";
+      let fileName = "";
+      let fileSize = 0;
+      let mime = "application/octet-stream";
+      let publicUrl = "";
+
+      if (req.file) {
+        filePath = String(req.file.path || "");
+        fileName = String(req.file.originalname || req.file.filename || "file");
+        fileSize = Number(req.file.size || 0);
+        mime = String(req.file.mimetype || "application/octet-stream");
+        publicUrl = filePublicUrl(String(req.file.filename || ""));
+      } else {
+        const resolved = await resolveMediaAssetFromUrl(String(body.url || ""));
+        filePath = resolved.filePath;
+        fileName = resolved.fileName;
+        fileSize = resolved.fileSize;
+        mime = resolved.mime;
+        publicUrl = resolved.publicUrl;
+      }
+
+      if (!filePath) {
+        return res.status(400).json({ ok: false, error: "file atau url media wajib diisi." });
+      }
+
+      const result = await sendMediaByType({
         tenantId: req.auth.tenantId,
         userId: req.auth.userId,
-        sessionKey: parsed.data.sessionKey,
-        to: parsed.data.to,
-        caption: parsed.data.caption || "",
-        filePath: req.file.path,
-        mime: req.file.mimetype,
-        fileName: req.file.originalname,
-        fileSize: req.file.size,
-        publicUrl: url,
+        sessionKey,
+        to,
+        mediaType,
+        caption,
+        filePath,
+        mime,
+        fileName,
+        fileSize,
+        publicUrl,
       });
       return res.json(result);
     } catch (e: any) {
@@ -373,8 +562,8 @@ api.post("/messages/send-location", dashboardAuthMw, requireSessionOwned, enforc
   const schema = z.object({
     sessionKey: z.string().min(3).max(64),
     to: z.string().min(8).max(30),
-    latitude: z.number(),
-    longitude: z.number(),
+    latitude: z.coerce.number(),
+    longitude: z.coerce.number(),
     name: z.string().max(120).optional(),
     address: z.string().max(255).optional(),
   });
@@ -400,7 +589,7 @@ api.post("/webhooks/set", dashboardAuthMw, (req: any, res: any) => setWebhook(re
 
 // Broadcast
 api.get("/broadcast/jobs", dashboardAuthMw, (req: any, res: any) => listBroadcastJobs(req, res));
-api.post("/broadcast/create", dashboardAuthMw, (req: any, res: any) => createBroadcast(req, res));
+api.post("/broadcast/create", dashboardAuthMw, enforceBroadcastLimitMw, upload.single("file"), (req: any, res: any) => createBroadcast(req, res));
 api.get("/broadcast/:id", dashboardAuthMw, (req: any, res: any) => getJob(req, res));
 api.get("/broadcast/:id/items", dashboardAuthMw, (req: any, res: any) => getJobItems(req, res));
 api.delete("/broadcast/:id", dashboardAuthMw, (req: any, res: any) => deleteJob(req, res));
@@ -415,6 +604,8 @@ api.post("/leads/delete", dashboardAuthMw, (req: any, res: any) => deleteLeads(r
 api.post("/leads/status", dashboardAuthMw, (req: any, res: any) => updateLeadStatus(req, res));
 api.get("/leads/temp-rules", dashboardAuthMw, (req: any, res: any) => getTempRules(req, res));
 api.post("/leads/temp-rules", dashboardAuthMw, (req: any, res: any) => saveTempRules(req, res));
+api.post("/leads/debug/classify", dashboardAuthMw, (req: any, res: any) => debugClassifyLead(req, res));
+api.get("/leads/audit/invalid", dashboardAuthMw, (req: any, res: any) => listInvalidLeadSkips(req, res));
 
 // UI Read API
 api.get("/ui/sessions", dashboardAuthMw, (req: any, res: any) => listSessions(req, res));
@@ -460,26 +651,26 @@ try {
 
 try {
   const { getTenant, getTenants, createTenant, updateTenantLimits } = require("./admin_routes");
-  api.get("/admin/tenant", dashboardAuthMw, (req: any, res: any) => getTenant(req, res));
-  api.get("/admin/tenants", dashboardAuthMw, (req: any, res: any) => getTenants(req, res));
-  api.post("/admin/tenants", dashboardAuthMw, (req: any, res: any) => createTenant(req, res));
-  api.put("/admin/tenants/:id/limits", dashboardAuthMw, (req: any, res: any) => updateTenantLimits(req, res));
+  api.get("/admin/tenant", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => getTenant(req, res));
+  api.get("/admin/tenants", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => getTenants(req, res));
+  api.post("/admin/tenants", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => createTenant(req, res));
+  api.put("/admin/tenants/:id/limits", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => updateTenantLimits(req, res));
 } catch (e) {
   console.error("failed to mount admin routes", e);
 }
 
 try {
   const billing = require("./billing_routes");
-  api.get("/admin/plans", dashboardAuthMw, (req: any, res: any) => billing.adminListPlans(req, res));
-  api.post("/admin/plans", dashboardAuthMw, (req: any, res: any) => billing.adminUpsertPlan(req, res));
-  api.get("/admin/tenants/:tenantId/subscription", dashboardAuthMw, (req: any, res: any) => billing.adminGetTenantSubscription(req, res));
-  api.post("/admin/tenants/:tenantId/subscription", dashboardAuthMw, (req: any, res: any) => billing.adminCreateSubscription(req, res));
-  api.post("/admin/tenants/:tenantId/subscription/:id/status", dashboardAuthMw, (req: any, res: any) =>
+  api.get("/admin/plans", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => billing.adminListPlans(req, res));
+  api.post("/admin/plans", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => billing.adminUpsertPlan(req, res));
+  api.get("/admin/tenants/:tenantId/subscription", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => billing.adminGetTenantSubscription(req, res));
+  api.post("/admin/tenants/:tenantId/subscription", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => billing.adminCreateSubscription(req, res));
+  api.post("/admin/tenants/:tenantId/subscription/:id/status", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) =>
     billing.adminSetSubscriptionStatus(req, res)
   );
-  api.get("/admin/tenants/:tenantId/payments", dashboardAuthMw, (req: any, res: any) => billing.adminListPayments(req, res));
-  api.post("/admin/tenants/:tenantId/payments", dashboardAuthMw, (req: any, res: any) => billing.adminCreatePayment(req, res));
-  api.post("/admin/tenants/:tenantId/payments/:id/mark-paid", dashboardAuthMw, (req: any, res: any) =>
+  api.get("/admin/tenants/:tenantId/payments", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => billing.adminListPayments(req, res));
+  api.post("/admin/tenants/:tenantId/payments", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) => billing.adminCreatePayment(req, res));
+  api.post("/admin/tenants/:tenantId/payments/:id/mark-paid", dashboardAuthMw, requireSuperadminMw, (req: any, res: any) =>
     billing.adminMarkPaymentPaid(req, res)
   );
 } catch (e) {
@@ -526,8 +717,8 @@ async function main() {
   await migrate();
   await bootSessions();
 
-  // workers: enable only if WORKERS=1
-  if (process.env.WORKERS === "1") {
+  // workers: enable by default unless WORKERS=0
+  if (process.env.WORKERS !== "0") {
     setInterval(() => require("./webhook").processWebhookQueue().catch(() => { }), 1500);
     setInterval(() => require("./broadcast").processBroadcastQueue().catch(() => { }), 600);
     setInterval(() => {
@@ -536,7 +727,14 @@ async function main() {
       } catch {
         /* ignore */
       }
-    }, 60000);
+    }, 5000);
+    setInterval(() => {
+      try {
+        require("./storage_maintenance").processStorageMaintenance().catch(() => { });
+      } catch {
+        /* ignore */
+      }
+    }, require("./storage_maintenance").getStorageMaintenanceIntervalMs());
   }
 
   const port = Number(process.env.PORT || 3001);

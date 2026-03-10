@@ -6,6 +6,31 @@ function n(v: any, def = 0) {
   return Number.isFinite(x) ? x : def;
 }
 
+const columnExistsCache = new Map<string, boolean>();
+let plansHasLegacyLimitMessagesPerDay: boolean | null = null;
+
+async function hasColumn(table: string, column: string) {
+  const key = `${table}.${column}`;
+  if (columnExistsCache.has(key)) return columnExistsCache.get(key) as boolean;
+
+  const [rows] = await pool.query<any[]>(
+    `SELECT COUNT(*) AS c
+     FROM information_schema.columns
+     WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ?`,
+    [table, column]
+  );
+
+  const exists = Number(rows?.[0]?.c || 0) > 0;
+  columnExistsCache.set(key, exists);
+  return exists;
+}
+
+async function hasLegacyPlanMessagesPerDayColumn() {
+  if (plansHasLegacyLimitMessagesPerDay !== null) return plansHasLegacyLimitMessagesPerDay;
+  plansHasLegacyLimitMessagesPerDay = await hasColumn("plans", "limit_messages_per_day");
+  return plansHasLegacyLimitMessagesPerDay;
+}
+
 export async function adminListPlans(req: any, res: any) {
   const [rows] = await pool.query<any[]>(
     `SELECT id, code, name, price_monthly, currency,
@@ -58,39 +83,100 @@ export async function adminUpsertPlan(req: any, res: any) {
 
   const d = parsed.data;
 
+  const hasLegacyLimitMessagesPerDay = await hasLegacyPlanMessagesPerDayColumn();
+
   if (!d.id) {
-    // insert + isi juga kolom legacy limit_messages_per_day (biar kompatibel)
+    const insertColumns = [
+      "code",
+      "name",
+      "price_monthly",
+      "currency",
+      "limit_sessions",
+      "limit_messages_daily",
+      "limit_broadcast_daily",
+      "limit_contacts",
+      "feature_api",
+      "feature_webhook",
+      "feature_inbox",
+      "feature_broadcast",
+      "feature_media",
+      "is_active",
+    ];
+    const insertValues: any[] = [
+      d.code,
+      d.name,
+      d.price_monthly,
+      d.currency,
+      d.limit_sessions,
+      d.limit_messages_daily,
+      d.limit_broadcast_daily,
+      d.limit_contacts,
+      d.feature_api,
+      d.feature_webhook,
+      d.feature_inbox,
+      d.feature_broadcast,
+      d.feature_media,
+      d.is_active,
+    ];
+
+    if (hasLegacyLimitMessagesPerDay) {
+      insertColumns.push("limit_messages_per_day");
+      insertValues.push(d.limit_messages_daily);
+    }
+
     const [r] = await pool.query<any>(
-      `INSERT INTO plans(
-        code,name,price_monthly,currency,
-        limit_sessions,limit_messages_daily,limit_broadcast_daily,limit_contacts,
-        feature_api,feature_webhook,feature_inbox,feature_broadcast,feature_media,
-        is_active,limit_messages_per_day
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        d.code, d.name, d.price_monthly, d.currency,
-        d.limit_sessions, d.limit_messages_daily, d.limit_broadcast_daily, d.limit_contacts,
-        d.feature_api, d.feature_webhook, d.feature_inbox, d.feature_broadcast, d.feature_media,
-        d.is_active, d.limit_messages_daily
-      ]
+      `INSERT INTO plans(${insertColumns.join(",")})
+       VALUES (${insertColumns.map(() => "?").join(",")})`,
+      insertValues
     );
+
     return res.json({ ok: true, id: r.insertId });
   } else {
+    const updateParts = [
+      "code=?",
+      "name=?",
+      "price_monthly=?",
+      "currency=?",
+      "limit_sessions=?",
+      "limit_messages_daily=?",
+      "limit_broadcast_daily=?",
+      "limit_contacts=?",
+      "feature_api=?",
+      "feature_webhook=?",
+      "feature_inbox=?",
+      "feature_broadcast=?",
+      "feature_media=?",
+      "is_active=?",
+    ];
+    const updateValues: any[] = [
+      d.code,
+      d.name,
+      d.price_monthly,
+      d.currency,
+      d.limit_sessions,
+      d.limit_messages_daily,
+      d.limit_broadcast_daily,
+      d.limit_contacts,
+      d.feature_api,
+      d.feature_webhook,
+      d.feature_inbox,
+      d.feature_broadcast,
+      d.feature_media,
+      d.is_active,
+    ];
+
+    if (hasLegacyLimitMessagesPerDay) {
+      updateParts.push("limit_messages_per_day=?");
+      updateValues.push(d.limit_messages_daily);
+    }
+
+    updateValues.push(d.id);
+
     const [r] = await pool.query<any>(
-      `UPDATE plans SET
-        code=?, name=?, price_monthly=?, currency=?,
-        limit_sessions=?, limit_messages_daily=?, limit_broadcast_daily=?, limit_contacts=?,
-        feature_api=?, feature_webhook=?, feature_inbox=?, feature_broadcast=?, feature_media=?,
-        is_active=?, limit_messages_per_day=?
-      WHERE id=?`,
-      [
-        d.code, d.name, d.price_monthly, d.currency,
-        d.limit_sessions, d.limit_messages_daily, d.limit_broadcast_daily, d.limit_contacts,
-        d.feature_api, d.feature_webhook, d.feature_inbox, d.feature_broadcast, d.feature_media,
-        d.is_active, d.limit_messages_daily,
-        d.id
-      ]
+      `UPDATE plans SET ${updateParts.join(", ")} WHERE id=?`,
+      updateValues
     );
+
     return res.json({ ok: true, affectedRows: r.affectedRows || 0 });
   }
 }

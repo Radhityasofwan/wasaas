@@ -235,7 +235,7 @@ CREATE TABLE IF NOT EXISTS broadcast_jobs (
   session_key VARCHAR(64) NOT NULL,
 
   name VARCHAR(160) NULL,
-  message_type ENUM('text','image','video','document','location') NOT NULL DEFAULT 'text',
+  message_type ENUM('text','image','video','document','audio','voice_note','sticker','location') NOT NULL DEFAULT 'text',
   text_body TEXT NULL,
 
   media_path TEXT NULL,       
@@ -414,7 +414,11 @@ CREATE TABLE IF NOT EXISTS auto_reply_rules (
   session_key VARCHAR(64) NULL,
   keyword VARCHAR(255) NOT NULL,
   match_type ENUM('exact','contains','startswith') NOT NULL DEFAULT 'exact',
-  reply_text TEXT NOT NULL,
+  reply_text TEXT NULL,
+  template_id BIGINT UNSIGNED NULL,
+  delay_ms INT UNSIGNED NOT NULL DEFAULT 2000,
+  typing_enabled TINYINT(1) NOT NULL DEFAULT 1,
+  typing_ms INT UNSIGNED NULL,
   is_active TINYINT(1) NOT NULL DEFAULT 1,
   created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 
@@ -433,7 +437,7 @@ CREATE TABLE IF NOT EXISTS message_templates (
   tenant_id BIGINT UNSIGNED NOT NULL,
   name VARCHAR(120) NOT NULL,
   
-  message_type ENUM('text','image','video','document','audio','location') NOT NULL DEFAULT 'text',
+  message_type ENUM('text','image','video','document','audio','voice_note','sticker','location') NOT NULL DEFAULT 'text',
   text_body TEXT NULL,
   
   media_mime VARCHAR(120) NULL,

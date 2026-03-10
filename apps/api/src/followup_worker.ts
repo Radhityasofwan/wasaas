@@ -1,27 +1,61 @@
 import { pool } from "./db";
-import path from "path";
-import fs from "fs";
 import { getSessionSock, sendText } from "./wa";
-import { sendMediaImage, sendMediaDocument, sendMediaVideo, sendLocation } from "./wa_media";
+import { sendLocation, sendMediaByType } from "./wa_media";
+import { resolveMediaAssetFromUrl } from "./media_asset_resolver";
+import { enqueueWebhook } from "./webhook";
 
 let isRunning = false;
+const sessionRestartAttemptAt = new Map<string, number>();
 
-function resolveUploadFromPublicUrl(publicUrl: string) {
-  // expected: https://DOMAIN/files/<filename> OR /files/<filename>
+function toSqlDateTime(d: Date) {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;
+}
+
+function normalizePhone(raw: string | null | undefined) {
+  return String(raw || "").replace(/[^\d]/g, "");
+}
+
+function isSessionError(msg: string | null | undefined) {
+  const s = String(msg || "");
+  return (
+    s.includes("Session socket is not running") ||
+    s.includes("Session is disconnected") ||
+    s.includes("Session context missing")
+  );
+}
+
+async function ensureSessionForFollowUp(tenantId: number, sessionKey: string) {
+  const cooldownMs = 15000;
+  const last = sessionRestartAttemptAt.get(sessionKey) || 0;
+  if (Date.now() - last < cooldownMs) return false;
+  sessionRestartAttemptAt.set(sessionKey, Date.now());
+
   try {
-    const u = publicUrl.startsWith("http") ? new URL(publicUrl) : null;
-    const pathname = u ? u.pathname : publicUrl;
-    const idx = pathname.indexOf("/files/");
-    if (idx === -1) return null;
-    const rel = pathname.substring(idx + "/files/".length);
-    if (!rel) return null;
-    const filePath = path.join(process.cwd(), "storage", "uploads", rel);
-    if (!fs.existsSync(filePath)) return null;
-    const st = fs.statSync(filePath);
-    return { filePath, fileSize: st.size, fileName: path.basename(filePath) };
-  } catch {
-    return null;
+    const [rows] = await pool.query<any[]>(
+      `SELECT user_id FROM wa_sessions WHERE tenant_id=? AND session_key=? ORDER BY id DESC LIMIT 1`,
+      [tenantId, sessionKey]
+    );
+    const userId = Number(rows?.[0]?.user_id || 0);
+    if (!userId) return false;
+
+    const { isConnected, startSession } = await import("./wa");
+    if (isConnected(sessionKey)) return true;
+    await startSession(sessionKey, { tenantId, userId });
+    return true;
+  } catch (e) {
+    console.error(`[FollowUp Worker] Failed auto-start session ${sessionKey}:`, e);
+    return false;
   }
+}
+
+async function setQueuedRetry(targetId: number, msg: string) {
+  try {
+    await pool.query(
+      `UPDATE followup_targets SET status = 'queued', last_error = ? WHERE id = ?`,
+      [`${msg} (auto-retry)`, targetId]
+    );
+  } catch {}
 }
 
 
@@ -75,22 +109,25 @@ export async function processFollowUpQueue() {
 
   try {
     const now = new Date();
+    const nowSql = toSqlDateTime(now);
+    console.log(`[FollowUp Worker] Waking up at ${now.toISOString()} - checking for queued targets...`);
     
-    // Ambil antrean target yang sudah waktunya dieksekusi (scheduled_at <= NOW)
     const [targets] = await pool.query<any[]>(
       `SELECT 
-         ft.id as target_id, ft.tenant_id, ft.session_key, ft.to_number, ft.to_jid, ft.created_at as target_added_at,
-         fc.trigger_condition, 
+         ft.id as target_id, ft.tenant_id, ft.session_key, ft.to_number, ft.to_jid, ft.created_at as target_added_at, ft.scheduled_at,
+         fc.id as campaign_id, fc.name as campaign_name, fc.trigger_condition, fc.status as campaign_status,
          mt.id as template_found, mt.message_type, mt.text_body, mt.media_url, mt.media_name, mt.media_mime
        FROM followup_targets ft
        JOIN followup_campaigns fc ON ft.campaign_id = fc.id
        LEFT JOIN message_templates mt ON fc.template_id = mt.id
        WHERE ft.status = 'queued' AND fc.status = 'active' AND ft.scheduled_at <= ?
+       ORDER BY ft.scheduled_at ASC, ft.id ASC
        LIMIT 30`,
-      [now]
+      [nowSql]
     );
 
     if (!targets.length) {
+      console.log(`[FollowUp Worker] No queued targets ready for ${now.toISOString()}`);
       return; // Langsung lari ke blok finally
     }
 
@@ -99,9 +136,10 @@ export async function processFollowUpQueue() {
     for (const target of targets) {
       const {
         target_id, tenant_id, session_key, to_number, to_jid, target_added_at,
-        trigger_condition, template_found, message_type, text_body, media_url,
+        campaign_id, campaign_name, trigger_condition, template_found, message_type, text_body, media_url,
         media_name, media_mime
       } = target;
+      const normalizedNumber = normalizePhone(to_number);
 
       if (!template_found) {
         await setFailed(target_id, "Template pesan telah dihapus");
@@ -110,17 +148,43 @@ export async function processFollowUpQueue() {
 
       const sock = getSessionSock(session_key);
       if (!sock) {
-        await setFailed(target_id, `Sesi WA '${session_key}' terputus / offline.`);
+        await ensureSessionForFollowUp(tenant_id, session_key);
+        await setQueuedRetry(target_id, `Sesi WA '${session_key}' terputus / offline.`);
         continue;
       }
 
       // Validasi balasan sebelum menembak pesan (Fitur Stop Jika Dibalas)
       if (trigger_condition === 'unreplied') {
         const [replies] = await pool.query<any[]>(
-          `SELECT id FROM wa_messages 
-           WHERE tenant_id = ? AND remote_jid = ? AND direction = 'in' AND created_at > ? 
+          `SELECT 1
+           FROM (
+             SELECT 1 AS x
+             FROM wa_messages wm
+             WHERE wm.tenant_id = ?
+               AND wm.direction = 'in'
+               AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(SUBSTRING_INDEX(wm.remote_jid, '@', 1), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') = ?
+             LIMIT 1
+
+             UNION ALL
+
+             SELECT 1 AS x
+             FROM broadcast_items bi
+             WHERE bi.tenant_id = ?
+               AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(bi.to_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') = ?
+               AND bi.reply_status = 'replied'
+             LIMIT 1
+
+             UNION ALL
+
+             SELECT 1 AS x
+             FROM followup_targets ft2
+             WHERE ft2.tenant_id = ?
+               AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(ft2.to_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') = ?
+               AND ft2.status = 'replied'
+             LIMIT 1
+           ) t
            LIMIT 1`,
-          [tenant_id, to_jid, target_added_at]
+          [tenant_id, normalizedNumber, tenant_id, normalizedNumber, tenant_id, normalizedNumber]
         );
 
         if (replies.length > 0) {
@@ -147,80 +211,77 @@ export async function processFollowUpQueue() {
 
       try {
         let sendResult: any;
+        const normalizedType = String(message_type || "text").trim().toLowerCase();
+        const mediaSendableTypes = new Set(["image", "document", "video", "audio", "voice_note", "sticker"]);
 
         // EKSEKUSI PENGIRIMAN BERDASARKAN TIPE
-        if (message_type === 'text') {
+        if (normalizedType === 'text') {
           sendResult = await sendText(session_key, to_jid, finalCaptionOrText);
-        } else if (message_type === 'image' && media_url) {
-          {
-          const resolved = resolveUploadFromPublicUrl(media_url);
+        } else if (mediaSendableTypes.has(normalizedType) && media_url) {
+          const resolved = await resolveMediaAssetFromUrl(media_url);
           if (!resolved) throw new Error("Media file not found on server for URL: " + media_url);
-          sendResult = await sendMediaImage({
+          sendResult = await sendMediaByType({
             tenantId: tenant_id,
             userId: 1,
             sessionKey: session_key,
             to: to_jid,
+            mediaType: normalizedType as any,
             caption: finalCaptionOrText,
             filePath: resolved.filePath,
-            mime: (media_mime || "application/octet-stream"),
+            mime: (media_mime || resolved.mime || "application/octet-stream"),
             fileName: (media_name || resolved.fileName),
             fileSize: resolved.fileSize,
             publicUrl: media_url
           });
-        }
-        } else if (message_type === 'document' && media_url) {
-          {
-          const resolved = resolveUploadFromPublicUrl(media_url);
-          if (!resolved) throw new Error("Media file not found on server for URL: " + media_url);
-          sendResult = await sendMediaDocument({
-            tenantId: tenant_id,
-            userId: 1,
-            sessionKey: session_key,
-            to: to_jid,
-            caption: finalCaptionOrText,
-            filePath: resolved.filePath,
-            mime: (media_mime || "application/octet-stream"),
-            fileName: (media_name || resolved.fileName),
-            fileSize: resolved.fileSize,
-            publicUrl: media_url
-          });
-        }
-        } else if (message_type === 'video' && media_url) {
-          {
-          const resolved = resolveUploadFromPublicUrl(media_url);
-          if (!resolved) throw new Error("Media file not found on server for URL: " + media_url);
-          sendResult = await sendMediaVideo({
-            tenantId: tenant_id,
-            userId: 1,
-            sessionKey: session_key,
-            to: to_jid,
-            caption: finalCaptionOrText,
-            filePath: resolved.filePath,
-            mime: (media_mime || "application/octet-stream"),
-            fileName: (media_name || resolved.fileName),
-            fileSize: resolved.fileSize,
-            publicUrl: media_url
-          });
-        }
-        } else if (message_type === 'location' && media_url) {
+        } else if (normalizedType === 'location' && media_url) {
           const [latStr, lngStr] = media_url.split(",");
           const lat = Number(latStr);
           const lng = Number(lngStr);
           if (isNaN(lat) || isNaN(lng)) throw new Error("Format koordinat tidak valid (lat,lng)");
-          sendResult = await sendLocation({ tenantId: tenant_id, userId: 1, sessionKey: session_key, to: to_jid, latitude: lat, longitude: lng });
+          sendResult = await sendLocation({
+            tenantId: tenant_id,
+            userId: 1,
+            sessionKey: session_key,
+            to: to_jid,
+            latitude: lat,
+            longitude: lng,
+            name: finalCaptionOrText || undefined,
+            address: media_name || undefined,
+          });
         } else {
-          sendResult = { ok: false, error: `Format Media tidak didukung atau URL kosong (${message_type})` };
+          sendResult = { ok: false, error: `Format Media tidak didukung atau URL kosong (${normalizedType})` };
         }
 
         if (sendResult?.ok) {
           await pool.query(
-            `UPDATE followup_targets SET status = 'sent', sent_at = NOW(), wa_message_id = ? WHERE id = ?`,
+            `UPDATE followup_targets SET status = 'sent', sent_at = NOW(), wa_message_id = ?, last_error = NULL WHERE id = ?`,
             [sendResult.messageId || null, target_id]
           );
+          enqueueWebhook(tenant_id, "followup.sent", {
+            sessionKey: session_key,
+            campaign_id,
+            campaign_name,
+            target_id,
+            to_number,
+            to_jid,
+            scheduled_at: target.scheduled_at,
+            sent_at: new Date(),
+            wa_message_id: sendResult.messageId || null,
+          }).catch(() => { });
         } else {
+          if (isSessionError(sendResult?.error)) {
+            await ensureSessionForFollowUp(tenant_id, session_key);
+            await setQueuedRetry(target_id, sendResult?.error || "Sesi offline");
+            continue;
+          }
           await setFailed(target_id, sendResult?.error || "Gagal mengirim pesan (Unknown Error)");
         }
       } catch (err: any) {
+        if (isSessionError(err?.message)) {
+          await ensureSessionForFollowUp(tenant_id, session_key);
+          await setQueuedRetry(target_id, err?.message || "Sesi offline");
+          continue;
+        }
         await setFailed(target_id, err.message);
       }
       

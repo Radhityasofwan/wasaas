@@ -5,7 +5,6 @@ import { pool } from "./db";
 // ============================================================================
 export async function getTenants(req: any, res: any) {
   try {
-    // Query yang menggabungkan Tenant, Subscription (Snapshot Limits), dan User Owner
     const [rows] = await pool.query<any[]>(
       `SELECT 
         t.id as tenant_id, t.name as tenant_name, t.is_active as tenant_active, t.created_at,
@@ -14,7 +13,20 @@ export async function getTenants(req: any, res: any) {
         p.name as plan_name, p.code as plan_code
        FROM tenants t
        LEFT JOIN users u ON u.tenant_id = t.id AND u.role = 'owner'
-       LEFT JOIN subscriptions s ON s.tenant_id = t.id
+       LEFT JOIN (
+         SELECT s1.*
+         FROM subscriptions s1
+         INNER JOIN (
+           SELECT
+             tenant_id,
+             COALESCE(
+               MAX(CASE WHEN status IN ('active','trial','past_due') THEN id END),
+               MAX(id)
+             ) AS latest_id
+           FROM subscriptions
+           GROUP BY tenant_id
+         ) sx ON sx.latest_id = s1.id
+       ) s ON s.tenant_id = t.id
        LEFT JOIN plans p ON p.id = s.plan_id
        ORDER BY t.id DESC`
     );
@@ -78,7 +90,11 @@ export async function createTenant(req: any, res: any) {
 // ============================================================================
 export async function updateTenantLimits(req: any, res: any) {
   try {
-    const tenantId = parseInt(req.params.id);
+    const tenantId = Number(req.params.id);
+    if (!Number.isFinite(tenantId) || tenantId <= 0) {
+      return res.status(400).json({ ok: false, error: "invalid tenant id" });
+    }
+
     const { 
       plan_id, 
       sub_status, 
@@ -87,7 +103,45 @@ export async function updateTenantLimits(req: any, res: any) {
       limit_broadcast_daily 
     } = req.body;
 
-    const [subs] = await pool.query<any[]>(`SELECT id FROM subscriptions WHERE tenant_id = ? LIMIT 1`, [tenantId]);
+    const nextPlanId =
+      plan_id === undefined || plan_id === null || String(plan_id).trim() === ""
+        ? null
+        : Number(plan_id);
+    const nextStatus = sub_status === undefined || sub_status === null || String(sub_status).trim() === ""
+      ? null
+      : String(sub_status).trim();
+
+    const sessions = Number(limit_sessions);
+    const messagesDaily = Number(limit_messages_daily);
+    const broadcastDaily = Number(limit_broadcast_daily);
+
+    if (nextPlanId !== null && (!Number.isFinite(nextPlanId) || nextPlanId <= 0)) {
+      return res.status(400).json({ ok: false, error: "invalid plan_id" });
+    }
+
+    if (
+      !Number.isFinite(sessions) || sessions < 0 ||
+      !Number.isFinite(messagesDaily) || messagesDaily < 0 ||
+      !Number.isFinite(broadcastDaily) || broadcastDaily < 0
+    ) {
+      return res.status(400).json({ ok: false, error: "invalid limits value" });
+    }
+
+    if (nextStatus) {
+      const allowed = new Set(["trial", "active", "past_due", "canceled", "expired"]);
+      if (!allowed.has(nextStatus)) {
+        return res.status(400).json({ ok: false, error: "invalid subscription status" });
+      }
+    }
+
+    const [subs] = await pool.query<any[]>(
+      `SELECT id
+       FROM subscriptions
+       WHERE tenant_id = ?
+       ORDER BY id DESC
+       LIMIT 1`,
+      [tenantId]
+    );
     
     if (subs?.length > 0) {
       await pool.query(
@@ -97,14 +151,22 @@ export async function updateTenantLimits(req: any, res: any) {
              limit_sessions = ?, 
              limit_messages_daily = ?, 
              limit_broadcast_daily = ?
-         WHERE tenant_id = ?`,
-        [plan_id, sub_status, limit_sessions, limit_messages_daily, limit_broadcast_daily, tenantId]
+         WHERE tenant_id = ? AND id = ?`,
+        [nextPlanId, nextStatus, sessions, messagesDaily, broadcastDaily, tenantId, Number(subs[0].id)]
       );
     } else {
+      let initialPlanId = nextPlanId;
+      if (!initialPlanId) {
+        const [planRows] = await pool.query<any[]>(
+          `SELECT id FROM plans WHERE is_active=1 ORDER BY id ASC LIMIT 1`
+        );
+        initialPlanId = Number(planRows?.[0]?.id || 1);
+      }
+
       await pool.query(
         `INSERT INTO subscriptions (tenant_id, plan_id, status, start_at, limit_sessions, limit_messages_daily, limit_broadcast_daily)
          VALUES (?, ?, ?, NOW(), ?, ?, ?)`,
-        [tenantId, plan_id || 1, sub_status || 'trial', limit_sessions, limit_messages_daily, limit_broadcast_daily]
+        [tenantId, initialPlanId, nextStatus || 'trial', sessions, messagesDaily, broadcastDaily]
       );
     }
 

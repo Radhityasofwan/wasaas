@@ -27,6 +27,30 @@ export async function listBroadcastJobs(req: any, res: any) {
       id, session_key, name, status, 
       total_targets, sent_count, failed_count, 
       delay_ms, LEFT(text_body, 100) as text_preview, 
+      (
+        SELECT COUNT(DISTINCT COALESCE(
+          NULLIF(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(bi.to_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''),
+            ''
+          ),
+          bi.to_number
+        ))
+        FROM broadcast_items bi
+        WHERE bi.job_id = broadcast_jobs.id
+      ) as distinct_target_count,
+      (
+        SELECT COALESCE(
+          NULLIF(
+            REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(bi2.to_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''),
+            ''
+          ),
+          bi2.to_number
+        )
+        FROM broadcast_items bi2
+        WHERE bi2.job_id = broadcast_jobs.id
+        ORDER BY bi2.id DESC
+        LIMIT 1
+      ) as primary_target_number,
       created_at, updated_at 
      FROM broadcast_jobs 
      WHERE tenant_id=? 
@@ -62,7 +86,7 @@ export async function cancelBroadcast(req: any, res: any) {
 export async function pauseBroadcast(req: any, res: any) {
   const tenantId = req.auth.tenantId;
   const jobId = Number(req.params.id);
-  
+
   if (!jobId) return res.status(400).json({ ok: false, error: "invalid id" });
 
   const [result] = await pool.query<any>(
@@ -78,7 +102,7 @@ export async function pauseBroadcast(req: any, res: any) {
 export async function resumeBroadcast(req: any, res: any) {
   const tenantId = req.auth.tenantId;
   const jobId = Number(req.params.id);
-  
+
   if (!jobId) return res.status(400).json({ ok: false, error: "invalid id" });
 
   // Kembalikan ke queued agar worker mendeteksinya kembali

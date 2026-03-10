@@ -1,4 +1,5 @@
 import { pool } from "./db";
+import { dispatchTenantPushNotification } from "./push_notify";
 
 type WebhookRow = {
   id: number;
@@ -41,6 +42,10 @@ export async function getActiveWebhook(tenantId: number): Promise<WebhookRow | n
 }
 
 export async function enqueueWebhook(tenantId: number, eventName: string, payload: any) {
+  dispatchTenantPushNotification(tenantId, eventName, payload).catch((e: any) => {
+    console.warn("[Push] dispatch failed:", e?.message || e);
+  });
+
   const wh = await getActiveWebhook(tenantId);
   if (!wh) return;
 

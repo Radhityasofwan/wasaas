@@ -153,43 +153,30 @@ export async function processFollowUpQueue() {
         continue;
       }
 
-      // Validasi balasan sebelum menembak pesan (Fitur Stop Jika Dibalas)
+      // Validasi balasan sebelum menembak pesan (khusus campaign ini)
       if (trigger_condition === 'unreplied') {
         const [replies] = await pool.query<any[]>(
           `SELECT 1
-           FROM (
-             SELECT 1 AS x
-             FROM wa_messages wm
-             WHERE wm.tenant_id = ?
-               AND wm.direction = 'in'
-               AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(SUBSTRING_INDEX(wm.remote_jid, '@', 1), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') = ?
-             LIMIT 1
-
-             UNION ALL
-
-             SELECT 1 AS x
-             FROM broadcast_items bi
-             WHERE bi.tenant_id = ?
-               AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(bi.to_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') = ?
-               AND bi.reply_status = 'replied'
-             LIMIT 1
-
-             UNION ALL
-
-             SELECT 1 AS x
-             FROM followup_targets ft2
-             WHERE ft2.tenant_id = ?
-               AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(ft2.to_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') = ?
-               AND ft2.status = 'replied'
-             LIMIT 1
-           ) t
+           FROM followup_targets ft2
+           WHERE ft2.campaign_id = ?
+             AND ft2.tenant_id = ?
+             AND ft2.session_key = ?
+             AND REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(ft2.to_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '') = ?
+             AND ft2.status = 'replied'
+             AND ft2.id <> ?
            LIMIT 1`,
-          [tenant_id, normalizedNumber, tenant_id, normalizedNumber, tenant_id, normalizedNumber]
+          [campaign_id, tenant_id, session_key, normalizedNumber, target_id]
         );
 
         if (replies.length > 0) {
-          console.log(`[FollowUp Worker] Batal: Target ${to_number} sudah membalas pesan sebelumnya.`);
-          await pool.query(`UPDATE followup_targets SET status = 'canceled', last_error = 'User already replied' WHERE id = ?`, [target_id]);
+          console.log(`[FollowUp Worker] Batal: Target ${to_number} sudah membalas follow up untuk campaign ini.`);
+          await pool.query(
+            `UPDATE followup_targets
+             SET status = 'canceled',
+                 last_error = 'User replied to this follow up campaign'
+             WHERE id = ?`,
+            [target_id]
+          );
           continue;
         }
       }

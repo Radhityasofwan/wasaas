@@ -757,32 +757,10 @@ export async function streamSSE(req: any, res: any) {
         const interactive = normalizeInteractivePayload(rawParsed, baseType, r.text_body);
         const cleanText = cleanMessageText(baseType, r.text_body, interactive);
         const normalizedType = interactive ? `interactive_${interactive.kind}` : baseType;
-
-        let ssePeer = String(r.remote_jid || "");
-        const directDigits = String(r.remote_jid || "").endsWith("@s.whatsapp.net")
-          ? normalizeTo62Digits(String(r.remote_jid || "").split("@")[0] || "")
-          : null;
-
-        if (directDigits) {
-          ssePeer = `${directDigits}@s.whatsapp.net`;
-        } else if (sessionKey) {
-          const [contactRows] = await pool.query<any[]>(
-            `SELECT phone_number
-             FROM wa_contacts
-             WHERE tenant_id = ? AND session_key = ? AND jid = ?
-               AND phone_number IS NOT NULL AND TRIM(phone_number) <> ''
-             ORDER BY id DESC
-             LIMIT 1`,
-            [tenantId, sessionKey, String(r.remote_jid || "")]
-          );
-          const mappedDigits = normalizeTo62Digits(String(contactRows?.[0]?.phone_number || ""));
-          if (mappedDigits) ssePeer = `${mappedDigits}@s.whatsapp.net`;
-        }
-
         send("message", {
           id: r.id,
           sessionKey: r.session_key,
-          peer: ssePeer,
+          peer: r.remote_jid,
           direction: r.direction,
           type: normalizedType,
           text: cleanText,

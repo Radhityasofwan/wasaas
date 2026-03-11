@@ -128,44 +128,6 @@ function normalizeTo62Digits(input: string): string | null {
   return null;
 }
 
-async function collectPeerAliasesForDelete(
-  tenantId: number,
-  sessionKey: string,
-  rawPeer: string
-): Promise<string[]> {
-  const candidateJids = new Set<string>();
-  const remoteJid = normalizeRemoteJid(rawPeer);
-
-  if (remoteJid) candidateJids.add(remoteJid);
-  if (rawPeer && rawPeer.includes("@")) candidateJids.add(rawPeer);
-
-  const sourceDigits = normalizeTo62Digits((rawPeer.split("@")[0] || rawPeer));
-  if (sourceDigits) {
-    candidateJids.add(`${sourceDigits}@s.whatsapp.net`);
-
-    const [rows] = await pool.query<any[]>(
-      `SELECT jid
-       FROM wa_contacts
-       WHERE tenant_id=? AND session_key=?
-         AND (
-           CASE
-             WHEN LEFT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(phone_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), 1) = '0' THEN CONCAT('62', SUBSTRING(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(phone_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), 2))
-             WHEN LEFT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(phone_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), 2) = '62' THEN REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(phone_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '')
-             WHEN LEFT(REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(phone_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''), 1) = '8' THEN CONCAT('62', REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(phone_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', ''))
-             ELSE REPLACE(REPLACE(REPLACE(REPLACE(REPLACE(TRIM(phone_number), '+', ''), ' ', ''), '-', ''), '(', ''), ')', '')
-           END
-         ) = ?`,
-      [tenantId, sessionKey, sourceDigits]
-    );
-
-    for (const r of (rows || [])) {
-      if (r?.jid) candidateJids.add(String(r.jid));
-    }
-  }
-
-  return Array.from(candidateJids).filter(Boolean);
-}
-
 /**
  * Ekstraktor JSON yang sangat aman.
  * Menangani string JSON yang mungkin rusak atau objek yang bersarang.
@@ -645,7 +607,7 @@ export async function markConversationRead(req: any, res: any) {
 export async function deleteConversations(req: any, res: any) {
   const schema = z.object({
     sessionKey: z.string().min(1).max(64),
-    peers: z.array(z.string()).min(1)
+    peers: z.array(z.string()).min(1) // Membutuhkan minimal 1 kontak target
   });
 
   const parsed = schema.safeParse(req.body);
@@ -657,30 +619,27 @@ export async function deleteConversations(req: any, res: any) {
   const { sessionKey, peers } = parsed.data;
 
   try {
-    const aliasSet = new Set<string>();
-
-    for (const peer of peers) {
-      const aliases = await collectPeerAliasesForDelete(tenantId, sessionKey, String(peer || ""));
-      for (const alias of aliases) aliasSet.add(alias);
-    }
-
-    const normalizedPeers = Array.from(aliasSet).filter(Boolean);
+    // Format JID seluruh peer
+    const normalizedPeers = peers.map((p: string) => normalizeRemoteJid(p));
 
     if (normalizedPeers.length === 0) {
       return res.json({ ok: true });
     }
 
+    // Pembuatan query dinamis (?, ?, ?) untuk clause IN SQL
     const placeholders = normalizedPeers.map(() => '?').join(',');
     const queryParams = [tenantId, sessionKey, ...normalizedPeers];
 
+    // 1. Hapus dari daftar chat / kontak sidebar
     await pool.query(
-      `DELETE FROM wa_chats
+      `DELETE FROM wa_chats 
        WHERE tenant_id = ? AND session_key = ? AND remote_jid IN (${placeholders})`,
       queryParams
     );
 
+    // 2. Hapus detail riwayat pesan secara total (Kaskade manual)
     await pool.query(
-      `DELETE FROM wa_messages
+      `DELETE FROM wa_messages 
        WHERE tenant_id = ? AND session_key = ? AND remote_jid IN (${placeholders})`,
       queryParams
     );
@@ -692,6 +651,11 @@ export async function deleteConversations(req: any, res: any) {
   }
 }
 
+/**
+ * GET /ui/stream?sessionKey=...&sinceId=...
+ * Sistem Server-Sent Events (SSE) untuk memberikan streaming data ringan ke client.
+ * FIX: Menambahkan blokir @g.us agar notifikasi grup tidak bocor ke koneksi stream.
+ */
 export async function streamSSE(req: any, res: any) {
   const schema = z.object({
     sessionKey: z.string().optional(),
@@ -757,32 +721,10 @@ export async function streamSSE(req: any, res: any) {
         const interactive = normalizeInteractivePayload(rawParsed, baseType, r.text_body);
         const cleanText = cleanMessageText(baseType, r.text_body, interactive);
         const normalizedType = interactive ? `interactive_${interactive.kind}` : baseType;
-
-        let ssePeer = String(r.remote_jid || "");
-        const directDigits = String(r.remote_jid || "").endsWith("@s.whatsapp.net")
-          ? normalizeTo62Digits(String(r.remote_jid || "").split("@")[0] || "")
-          : null;
-
-        if (directDigits) {
-          ssePeer = `${directDigits}@s.whatsapp.net`;
-        } else if (sessionKey) {
-          const [contactRows] = await pool.query<any[]>(
-            `SELECT phone_number
-             FROM wa_contacts
-             WHERE tenant_id = ? AND session_key = ? AND jid = ?
-               AND phone_number IS NOT NULL AND TRIM(phone_number) <> ''
-             ORDER BY id DESC
-             LIMIT 1`,
-            [tenantId, sessionKey, String(r.remote_jid || "")]
-          );
-          const mappedDigits = normalizeTo62Digits(String(contactRows?.[0]?.phone_number || ""));
-          if (mappedDigits) ssePeer = `${mappedDigits}@s.whatsapp.net`;
-        }
-
         send("message", {
           id: r.id,
           sessionKey: r.session_key,
-          peer: ssePeer,
+          peer: r.remote_jid,
           direction: r.direction,
           type: normalizedType,
           text: cleanText,
